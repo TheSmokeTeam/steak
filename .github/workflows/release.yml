@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["*"]
+    tags: ["1.0.0-alpha.*"]
 
 permissions:
   contents: write
@@ -50,6 +50,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: true
           files: |
             artifacts/publish/win-x64/Steak.exe
             artifacts/release/Steak-win-x64-portable.zip
