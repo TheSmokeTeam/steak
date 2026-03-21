@@ -53,7 +53,15 @@ public static class SteakApiEndpoints
             return Results.NoContent();
         })
         .WithName("Disconnect")
-        .WithSummary("Disconnect and discard the active connection session.");
+        .WithSummary("Disconnect and discard all active connection sessions.");
+
+        connection.MapDelete("/{sessionId}", (string sessionId, IConnectionSessionService sessionService) =>
+        {
+            sessionService.Disconnect(sessionId);
+            return Results.NoContent();
+        })
+        .WithName("DisconnectSession")
+        .WithSummary("Disconnect a specific connection session by id.");
 
         connection.MapGet("/", (IConnectionSessionService sessionService) =>
         {
@@ -61,6 +69,13 @@ public static class SteakApiEndpoints
         })
         .WithName("GetConnectionStatus")
         .WithSummary("Get the current connection session status.");
+
+        connection.MapGet("/all", (IConnectionSessionService sessionService) =>
+        {
+            return Results.Ok(sessionService.GetAllSessions());
+        })
+        .WithName("GetAllConnections")
+        .WithSummary("Get all active connection sessions.");
 
         // Topic browsing
         var topics = api.MapGroup("/topics");

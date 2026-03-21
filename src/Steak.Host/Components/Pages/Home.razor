@@ -6,45 +6,84 @@
     <section class="connection-card surface">
         <div class="connection-header">
             <div>
-                <p class="section-kicker">Connection</p>
-                <h2>@(_connectionStatus.IsConnected ? _connectionStatus.BootstrapServers : "Not connected")</h2>
+                <p class="section-kicker">Connections</p>
+                <h2>@(_sessions.Count > 0 ? $"{_sessions.Count} active" : "Not connected")</h2>
             </div>
             <div class="connection-actions">
                 <a class="ghost-button" href="/swagger" target="_blank" rel="noreferrer">Swagger</a>
-                @if (_connectionStatus.IsConnected)
+                @if (_showConnectForm)
                 {
-                    <button class="danger-button" @onclick="DisconnectAsync">Disconnect</button>
+                    <button class="ghost-button" @onclick="@(() => _showConnectForm = false)">Cancel</button>
+                }
+                else
+                {
+                    <button class="primary-button" @onclick="@(() => _showConnectForm = true)">+ New Connection</button>
                 }
             </div>
         </div>
 
-        @if (!_connectionStatus.IsConnected)
+        @if (_showConnectForm)
         {
             <div class="connect-form">
                 <div class="form-grid">
                     <label>
-                        <span>Bootstrap Servers</span>
+                        <span>Bootstrap Servers <span class="tooltip-icon">?<span class="tooltip-text">Comma-separated list of Kafka broker addresses.
+Each entry is host:port. The client will discover
+the full cluster from any reachable broker.
+Example: broker-1:9092,broker-2:9092
+Usually your cluster's advertised listeners.</span></span></span>
                         <input @bind="_settings.BootstrapServers" placeholder="broker-1:9092,broker-2:9092" />
                     </label>
                     <label>
-                        <span>Username</span>
-                        <input @bind="_settings.Username" />
+                        <span>Username (required) <span class="tooltip-icon">?<span class="tooltip-text">SASL username for authenticating to the cluster.
+Used with SASL_PLAINTEXT or SASL_SSL protocols.
+Also used as a default Client Id and Consumer Group
+if those fields are left empty.
+Typically an ACL principal or service account.</span></span></span>
+                        <input @bind="_settings.Username" placeholder="admin" />
                     </label>
                     <label>
-                        <span>Password</span>
+                        <span>Password (required) <span class="tooltip-icon">?<span class="tooltip-text">SASL password paired with the username above.
+Sent during the SASL handshake before any data flows.
+Keep this secret — it is never stored to disk.
+For SCRAM mechanisms the password is hashed.
+For PLAIN it is sent in cleartext (use SSL).</span></span></span>
                         <input type="password" @bind="_settings.Password" />
                     </label>
                     <label>
-                        <span>Security Protocol</span>
-                        <input @bind="_settings.SecurityProtocol" placeholder="SaslPlaintext" />
+                        <span>Security Protocol <span class="tooltip-icon">?<span class="tooltip-text">Determines encryption and authentication mode.
+SASL_SSL — SASL auth over TLS (recommended for prod).
+SASL_PLAINTEXT — SASL auth without encryption.
+SSL — TLS mutual auth with client certificates.
+PLAINTEXT — no encryption or SASL (dev only).</span></span></span>
+                        <select @bind="_settings.SecurityProtocol">
+                            <option value="SaslSsl">SASL_SSL</option>
+                            <option value="SaslPlaintext">SASL_PLAINTEXT</option>
+                            <option value="Ssl">SSL</option>
+                            <option value="Plaintext">PLAINTEXT</option>
+                        </select>
                     </label>
                     <label>
-                        <span>SASL Mechanism</span>
-                        <input @bind="_settings.SaslMechanism" placeholder="ScramSha512" />
+                        <span>SASL Mechanism <span class="tooltip-icon">?<span class="tooltip-text">Authentication algorithm used during SASL handshake.
+SCRAM-SHA-512 — secure challenge-response (default).
+SCRAM-SHA-256 — lighter SCRAM variant.
+PLAIN — simple username/password (needs SSL).
+OAUTHBEARER / GSSAPI — token or Kerberos auth.</span></span></span>
+                        <select @bind="_settings.SaslMechanism">
+                            <option value="ScramSha512">SCRAM-SHA-512</option>
+                            <option value="ScramSha256">SCRAM-SHA-256</option>
+                            <option value="Plain">PLAIN</option>
+                            <option value="OAuthBearer">OAUTHBEARER</option>
+                            <option value="Gssapi">GSSAPI (Kerberos)</option>
+                        </select>
                     </label>
                     <label>
-                        <span>Client Id</span>
-                        <input @bind="_settings.ClientId" placeholder="steak-ui" />
+                        <span>Client Id (defaults to username) <span class="tooltip-icon">?<span class="tooltip-text">Identifier sent to brokers for monitoring/logging.
+Appears in broker logs and connection metrics.
+Defaults to username when left blank.
+Useful for distinguishing multiple Steak instances
+connecting with the same credentials.</span></span></span>
+                        <input @bind="_settings.ClientId" placeholder="(uses username)" />
                     </label>
                 </div>
 
@@ -52,30 +91,57 @@
                     <summary>Advanced settings</summary>
                     <div class="form-grid">
                         <label>
-                            <span>SSL CA PEM</span>
+                            <span>SSL CA PEM <span class="tooltip-icon">?<span class="tooltip-text">PEM-encoded Certificate Authority certificate.
+Used to verify the broker's TLS certificate.
+Required when brokers use private/self-signed CAs.
+Paste the full PEM including BEGIN/END markers.
+Leave blank if your system CA store is sufficient.</span></span></span>
                             <textarea rows="3" @bind="_settings.SslCaPem"></textarea>
                         </label>
                         <label>
-                            <span>SSL Certificate PEM</span>
+                            <span>SSL Certificate PEM <span class="tooltip-icon">?<span class="tooltip-text">PEM-encoded client certificate for mutual TLS.
+Sent to the broker so it can verify this client.
+Required when the cluster enforces mTLS.
+Paste the full certificate chain if needed.
+Used with the SSL or SASL_SSL protocols.</span></span></span>
                             <textarea rows="3" @bind="_settings.SslCertificatePem"></textarea>
                         </label>
                         <label>
-                            <span>SSL Key PEM</span>
+                            <span>SSL Key PEM <span class="tooltip-icon">?<span class="tooltip-text">PEM-encoded private key matching the client certificate.
+Used for mutual TLS authentication with the broker.
+Must correspond to the SSL Certificate PEM above.
+Paste the full key including BEGIN/END markers.
+Protect this value — it authenticates this client.</span></span></span>
                             <textarea rows="3" @bind="_settings.SslKeyPem"></textarea>
                         </label>
                         <label>
-                            <span>SSL Key Password</span>
+                            <span>SSL Key Password <span class="tooltip-icon">?<span class="tooltip-text">Passphrase to decrypt the SSL private key PEM.
+Required only if the key PEM is encrypted.
+Leave blank if the key is in plain PEM format.
+Stored in memory only — never persisted to disk.
+Common when keys are exported from Java keystores.</span></span></span>
                             <input type="password" @bind="_settings.SslKeyPassword" />
                         </label>
                     </div>
                     <label class="wide-field">
-                        <span>Advanced Overrides (key=value per line)</span>
+                        <span>Advanced Overrides (key=value per line) <span class="tooltip-icon">?<span class="tooltip-text">Raw librdkafka configuration properties.
+One key=value pair per line.
+Overrides any auto-configured settings above.
+See confluent-kafka docs for all available keys.
+Example: request.timeout.ms=10000</span></span></span>
                         <textarea rows="3" @bind="_advancedOverrideText" placeholder="request.timeout.ms=10000"></textarea>
                     </label>
                 </details>
 
                 <div class="button-row">
-                    <button class="primary-button" @onclick="ConnectAsync" disabled="@string.IsNullOrWhiteSpace(_settings.BootstrapServers)">Connect</button>
+                    <button class="primary-button" @onclick="ConnectAsync"
+                            disabled="@(string.IsNullOrWhiteSpace(_settings.BootstrapServers) || string.IsNullOrWhiteSpace(_settings.Username) || string.IsNullOrWhiteSpace(_settings.Password))">
+                        @(_editingSessionId is not null ? "Reconnect" : "Connect")
+                    </button>
+                    @if (_editingSessionId is not null)
+                    {
+                        <button class="ghost-button" @onclick="@(() => { _editingSessionId = null; _showConnectForm = false; _settings = new KafkaConnectionSettings { SecurityProtocol = "SaslSsl", SaslMechanism = "ScramSha512" }; })">Cancel Edit</button>
+                    }
                 </div>
             </div>
         }
@@ -86,26 +152,41 @@
         }
     </section>
 
-    @if (_connectionStatus.IsConnected)
+    @if (_sessions.Count > 0)
     {
         <section class="surface workspace-surface">
-            <div class="tab-strip" role="tablist" aria-label="Steak workspaces">
-                <button class="@GetTabClass("view")" @onclick="@(() => _activeTab = "view")">View</button>
-                <button class="@GetTabClass("consume")" @onclick="@(() => _activeTab = "consume")">Consume</button>
-                <button class="@GetTabClass("publish")" @onclick="@(() => _activeTab = "publish")">Publish</button>
+            <div class="tab-strip" role="tablist" aria-label="Connection tabs">
+                @foreach (var session in _sessions)
+                {
+                    <button class="@GetConnectionTabClass(session.ConnectionSessionId!)"
+                            @onclick="@(() => SwitchConnection(session.ConnectionSessionId!))">
+                        @session.BootstrapServers
+                        <span class="tab-edit" @onclick="@(() => EditConnection(session.ConnectionSessionId!))" @onclick:stopPropagation="true">&#9998;</span>
+                        <span class="tab-close" @onclick="@(() => DisconnectSessionAsync(session.ConnectionSessionId!))" @onclick:stopPropagation="true">&times;</span>
+                    </button>
+                }
             </div>
 
-            @if (_activeTab == "view")
+            @if (_activeSession is not null)
             {
-                <ViewWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
-            }
-            else if (_activeTab == "consume")
-            {
-                <ConsumeWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
-            }
-            else
-            {
-                <PublishWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
+                <div class="tab-strip" role="tablist" aria-label="Steak workspaces">
+                    <button class="@GetTabClass("view")" @onclick="@(() => _activeTab = "view")">View</button>
+                    <button class="@GetTabClass("consume")" @onclick="@(() => _activeTab = "consume")">Consume</button>
+                    <button class="@GetTabClass("publish")" @onclick="@(() => _activeTab = "publish")">Publish</button>
+                </div>
+
+                @if (_activeTab == "view")
+                {
+                    <ViewWorkspace ConnectionSessionId="@_activeSession.ConnectionSessionId" OnSessionLost="HandleSessionLost" />
+                }
+                else if (_activeTab == "consume")
+                {
+                    <ConsumeWorkspace ConnectionSessionId="@_activeSession.ConnectionSessionId" OnSessionLost="HandleSessionLost" Username="@_activeSession.Username" />
+                }
+                else
+                {
+                    <PublishWorkspace ConnectionSessionId="@_activeSession.ConnectionSessionId" OnSessionLost="HandleSessionLost" />
+                }
             }
         </section>
     }
@@ -115,15 +196,20 @@
     private string _activeTab = "view";
     private string? _error;
     private string _advancedOverrideText = string.Empty;
-    private KafkaConnectionSettings _settings = new();
-    private ConnectionSessionStatus _connectionStatus = new();
+    private bool _showConnectForm = true;
+    private string? _editingSessionId;
+    private KafkaConnectionSettings _settings = new() { SecurityProtocol = "SaslSsl", SaslMechanism = "ScramSha512" };
+    private List<ConnectionSessionStatus> _sessions = [];
+    private ConnectionSessionStatus? _activeSession;
 
     [Inject]
     private IConnectionSessionService SessionService { get; set; } = default!;
 
     protected override void OnInitialized()
     {
-        _connectionStatus = SessionService.GetStatus();
+        _sessions = SessionService.GetAllSessions().ToList();
+        _activeSession = _sessions.FirstOrDefault();
+        if (_sessions.Count > 0) _showConnectForm = false;
     }
 
     private Task ConnectAsync()
@@ -136,8 +222,29 @@
                 _settings.AdvancedOverrides = KeyValueTextParser.Parse(_advancedOverrideText);
             }
 
+            // Auto-set security protocol and mechanism for SASL when not set.
+            if (string.IsNullOrWhiteSpace(_settings.SecurityProtocol))
+            {
+                _settings.SecurityProtocol = "SaslSsl";
+            }
+            if (string.IsNullOrWhiteSpace(_settings.SaslMechanism))
+            {
+                _settings.SaslMechanism = "ScramSha512";
+            }
+
+            // If editing, disconnect the old session first
+            if (!string.IsNullOrWhiteSpace(_editingSessionId))
+            {
+                SessionService.Disconnect(_editingSessionId);
+                _editingSessionId = null;
+            }
+
             var response = SessionService.Connect(new ConnectRequest { Settings = _settings });
-            _connectionStatus = SessionService.GetStatus();
+            _sessions = SessionService.GetAllSessions().ToList();
+            _activeSession = _sessions.FirstOrDefault(s => s.ConnectionSessionId == response.ConnectionSessionId);
+            _settings = new KafkaConnectionSettings { SecurityProtocol = "SaslSsl", SaslMechanism = "ScramSha512" };
+            _advancedOverrideText = string.Empty;
+            _showConnectForm = false;
         }
         catch (Exception exception)
         {
@@ -147,14 +254,21 @@
         return Task.CompletedTask;
     }
 
-    private Task DisconnectAsync()
+    private Task DisconnectSessionAsync(string sessionId)
     {
         try
         {
-            SessionService.Disconnect();
-            _connectionStatus = SessionService.GetStatus();
-            _settings = new KafkaConnectionSettings();
-            _advancedOverrideText = string.Empty;
+            SessionService.Disconnect(sessionId);
+            _sessions = SessionService.GetAllSessions().ToList();
+            if (_activeSession?.ConnectionSessionId == sessionId)
+            {
+                _activeSession = _sessions.FirstOrDefault();
+            }
+            if (_sessions.Count == 0)
+            {
+                _showConnectForm = true;
+                _activeSession = null;
+            }
             _error = null;
         }
         catch (Exception exception)
@@ -165,8 +279,49 @@
         return Task.CompletedTask;
     }
 
+    private void SwitchConnection(string sessionId)
+    {
+        _activeSession = _sessions.FirstOrDefault(s => s.ConnectionSessionId == sessionId);
+    }
+
+    private string GetConnectionTabClass(string sessionId)
+    {
+        return _activeSession?.ConnectionSessionId == sessionId ? "tab-button active" : "tab-button";
+    }
+
     private string GetTabClass(string tab)
     {
         return _activeTab == tab ? "tab-button active" : "tab-button";
+    }
+
+    private void EditConnection(string sessionId)
+    {
+        var session = _sessions.FirstOrDefault(s => s.ConnectionSessionId == sessionId);
+        if (session is null) return;
+
+        _editingSessionId = sessionId;
+        _settings = new KafkaConnectionSettings
+        {
+            BootstrapServers = session.BootstrapServers,
+            SecurityProtocol = "SaslSsl",
+            SaslMechanism = "ScramSha512"
+        };
+        _showConnectForm = true;
+    }
+
+    private void HandleSessionLost(string? sessionId)
+    {
+        _sessions = SessionService.GetAllSessions().ToList();
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            _sessions.RemoveAll(s => s.ConnectionSessionId == sessionId);
+        }
+        _activeSession = _sessions.FirstOrDefault();
+        if (_sessions.Count == 0)
+        {
+            _showConnectForm = true;
+            _activeSession = null;
+            _error = "Connection session was lost. Please reconnect.";
+        }
     }
 }

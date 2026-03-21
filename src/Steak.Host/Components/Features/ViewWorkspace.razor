@@ -13,11 +13,19 @@
 
     <div class="control-grid">
         <label>
-            <span>Topic Filter</span>
+            <span>Topic Filter <span class="tooltip-icon">?<span class="tooltip-text">Type to filter the topic list below.
+Matches any part of the topic name.
+Useful when the cluster has hundreds of topics.
+The filter is case-insensitive.
+Clear the field to show all topics.</span></span></span>
             <input @bind="_topicFilter" placeholder="search topics" />
         </label>
         <label>
-            <span>Topic</span>
+            <span>Topic <span class="tooltip-icon">?<span class="tooltip-text">Select the Kafka topic to stream messages from.
+Only topics matching the filter above are shown.
+You must select a topic before starting live view.
+Partition and offset options update automatically.
+Refresh Topics to reload the list from the cluster.</span></span></span>
             <select @bind="_selectedTopic">
                 <option value="">Select topic</option>
                 @foreach (var topic in FilteredTopics)
@@ -27,7 +35,11 @@
             </select>
         </label>
         <label>
-            <span>Partition</span>
+            <span>Partition <span class="tooltip-icon">?<span class="tooltip-text">Choose a specific partition or "All partitions".
+Selecting a single partition reduces noise.
+Partition IDs are 0-based integers.
+The list is populated from the selected topic.
+"All" streams from every partition simultaneously.</span></span></span>
             <select @bind="_selectedPartitionValue">
                 <option value="">All partitions</option>
                 @if (SelectedTopicSummary is not null)
@@ -40,7 +52,11 @@
             </select>
         </label>
         <label>
-            <span>Offset Mode</span>
+            <span>Offset Mode <span class="tooltip-icon">?<span class="tooltip-text">Where to start reading messages in the partition.
+Earliest — read all historical messages from the start.
+Latest — only see new messages arriving after start.
+Stored — resume from the last committed offset.
+Timestamp — start from a specific point in time.</span></span></span>
             <select @bind="_offsetMode">
                 @foreach (var mode in Enum.GetValues<MessageOffsetMode>())
                 {
@@ -49,18 +65,32 @@
             </select>
         </label>
         <label>
-            <span>Group Id (optional)</span>
+            <span>Group Id (optional) <span class="tooltip-icon">?<span class="tooltip-text">Consumer group for offset tracking.
+Leave blank for an ephemeral viewer (no commits).
+Setting a group lets "Stored" offset mode resume.
+Multiple viewers sharing a group split partitions.
+Useful for bookmarking your read position.</span></span></span>
             <input @bind="_groupId" placeholder="leave blank for ephemeral viewer" />
         </label>
         <label>
-            <span>Message Filter</span>
+            <span>Message Filter <span class="tooltip-icon">?<span class="tooltip-text">Search text applied to buffered messages.
+Filters the message list in real-time.
+Matches against key, value preview, and headers.
+Case-insensitive substring match.
+Does not affect what is consumed from Kafka.</span></span></span>
             <input @bind="_messageFilter" placeholder="search recent payloads" />
         </label>
     </div>
 
     <div class="button-row">
-        <button class="primary-button" disabled="@(!CanStart)" @onclick="StartAsync">Start Live View</button>
-        <button class="ghost-button" disabled="@(!_sessionStatus.IsRunning)" @onclick="StopAsync">Stop</button>
+        @if (_sessionStatus.IsRunning)
+        {
+            <button class="stop-button" @onclick="StopAsync">&#9632; Stop Live View</button>
+        }
+        else
+        {
+            <button class="start-button" disabled="@(!CanStart)" @onclick="StartAsync">&#9654; Start Live View</button>
+        }
         <span class="status-pill @(_sessionStatus.IsRunning ? "live" : "idle")">
             @(_sessionStatus.IsRunning ? $"Streaming {_sessionStatus.ReceivedCount} messages" : "Idle")
         </span>
@@ -194,15 +224,37 @@
                     </div>
                 </div>
                 <div>
-                    <h4>Key + Body</h4>
+                    <h4>Key</h4>
                     <div class="code-stack">
-                        <label><span>Key Base64</span><textarea readonly rows="3">@(_selectedMessage.KeyBase64 ?? "No key")</textarea></label>
-                        <label><span>Key UTF-8</span><textarea readonly rows="3">@(_selectedMessage.Preview?.KeyUtf8Preview ?? "Binary or no key")</textarea></label>
-                        <label><span>Key Hex</span><textarea readonly rows="3">@(_selectedMessage.Preview?.KeyHexPreview ?? "No key")</textarea></label>
-                        <label><span>Value Base64</span><textarea readonly rows="4">@_selectedMessage.ValueBase64</textarea></label>
-                        <label><span>UTF-8 Preview</span><textarea readonly rows="4">@(_selectedMessage.Preview?.ValueUtf8Preview ?? "Binary or invalid UTF-8")</textarea></label>
-                        <label><span>Pretty JSON</span><textarea readonly rows="6">@(_selectedMessage.Preview?.ValuePrettyJson ?? "Not valid JSON")</textarea></label>
-                        <label><span>Hex Preview</span><textarea readonly rows="6">@_selectedMessage.Preview?.ValueHexPreview</textarea></label>
+                        <label>
+                            <span>Key Deserializer</span>
+                            <select @bind="_keyDeserializer">
+                                @foreach (var fmt in _deserializerFormats)
+                                {
+                                    <option value="@fmt">@fmt</option>
+                                }
+                            </select>
+                        </label>
+                        <label><span>Deserialized Key</span><textarea readonly rows="4">@DeserializeBytes(_selectedMessage.KeyBase64, _keyDeserializer)</textarea></label>
+                    </div>
+                    <h4>Body</h4>
+                    <div class="code-stack">
+                        <label>
+                            <span>Value Deserializer</span>
+                            <select @bind="_valueDeserializer">
+                                @foreach (var fmt in _deserializerFormats)
+                                {
+                                    <option value="@fmt">@fmt</option>
+                                }
+                            </select>
+                        </label>
+                        <label><span>Deserialized Value</span><textarea readonly rows="8">@DeserializeBytes(_selectedMessage.ValueBase64, _valueDeserializer)</textarea></label>
+                    </div>
+                    <h4>Raw</h4>
+                    <div class="code-stack">
+                        <label><span>Key Base64</span><textarea readonly rows="2">@(_selectedMessage.KeyBase64 ?? "No key")</textarea></label>
+                        <label><span>Value Base64</span><textarea readonly rows="3">@_selectedMessage.ValueBase64</textarea></label>
+                        <label><span>Hex Preview</span><textarea readonly rows="3">@_selectedMessage.Preview?.ValueHexPreview</textarea></label>
                     </div>
                 </div>
             </div>
@@ -213,6 +265,9 @@
 @code {
     [Parameter]
     public string? ConnectionSessionId { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnSessionLost { get; set; }
 
     private readonly List<KafkaTopicSummary> _topics = [];
     private ViewSessionStatus _sessionStatus = new();
@@ -225,7 +280,32 @@
     private bool _loadingTopics;
     private string? _loadedSessionId;
     private string? _error;
-    private MessageOffsetMode _offsetMode = MessageOffsetMode.Latest;
+    private MessageOffsetMode _offsetMode = MessageOffsetMode.Earliest;
+    private string _keyDeserializer = "UTF-8 String";
+    private string _valueDeserializer = "Pretty JSON";
+
+    private static readonly string[] _deserializerFormats = [
+        "UTF-8 String",
+        "Pretty JSON",
+        "Base64 (raw)",
+        "Hex",
+        "Int16 (Big-Endian)",
+        "Int32 (Big-Endian)",
+        "Int64 (Big-Endian)",
+        "UInt16 (Big-Endian)",
+        "UInt32 (Big-Endian)",
+        "UInt64 (Big-Endian)",
+        "Float (IEEE 754)",
+        "Double (IEEE 754)",
+        "UUID / GUID",
+        "Unix Timestamp (s)",
+        "Unix Timestamp (ms)",
+        "Boolean",
+        "Protobuf (wire)",
+        "MessagePack (hex)",
+        "URL-Encoded",
+        "Latin-1 String"
+    ];
 
     private KafkaTopicSummary? SelectedTopicSummary => _topics.FirstOrDefault(t => t.Name == _selectedTopic);
     private bool CanStart => !string.IsNullOrWhiteSpace(ConnectionSessionId) && !string.IsNullOrWhiteSpace(_selectedTopic);
@@ -249,7 +329,8 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal))
+        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(ConnectionSessionId))
         {
             _loadedSessionId = ConnectionSessionId;
             await RefreshTopicsAsync().ConfigureAwait(false);
@@ -271,7 +352,12 @@
             if (_topics.Count > 0 && !_topics.Any(t => t.Name == _selectedTopic))
                 _selectedTopic = _topics[0].Name;
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
+                await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
+        }
         finally
         {
             _loadingTopics = false;
@@ -316,4 +402,146 @@
     }
 
     public void Dispose() => ViewSessionService.StateChanged -= HandleStateChanged;
+
+    private static string DeserializeBytes(string? base64, string format)
+    {
+        if (string.IsNullOrWhiteSpace(base64)) return "(empty)";
+
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(base64); }
+        catch { return $"Invalid base64: {base64[..Math.Min(base64.Length, 40)]}"; }
+
+        if (bytes.Length == 0) return "(empty)";
+
+        try
+        {
+            return format switch
+            {
+                "UTF-8 String" => System.Text.Encoding.UTF8.GetString(bytes),
+                "Pretty JSON" => TryPrettyJson(bytes),
+                "Base64 (raw)" => base64,
+                "Hex" => BitConverter.ToString(bytes).Replace("-", " "),
+                "Int16 (Big-Endian)" when bytes.Length >= 2 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(bytes).ToString(),
+                "Int32 (Big-Endian)" when bytes.Length >= 4 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes).ToString(),
+                "Int64 (Big-Endian)" when bytes.Length >= 8 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(bytes).ToString(),
+                "UInt16 (Big-Endian)" when bytes.Length >= 2 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(bytes).ToString(),
+                "UInt32 (Big-Endian)" when bytes.Length >= 4 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes).ToString(),
+                "UInt64 (Big-Endian)" when bytes.Length >= 8 =>
+                    System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(bytes).ToString(),
+                "Float (IEEE 754)" when bytes.Length >= 4 =>
+                    BitConverter.ToSingle(bytes.Length == 4 ? bytes.Reverse().ToArray() : bytes[..4].Reverse().ToArray()).ToString("G"),
+                "Double (IEEE 754)" when bytes.Length >= 8 =>
+                    BitConverter.ToDouble(bytes.Length == 8 ? bytes.Reverse().ToArray() : bytes[..8].Reverse().ToArray()).ToString("G"),
+                "UUID / GUID" when bytes.Length >= 16 => new Guid(bytes[..16]).ToString(),
+                "Unix Timestamp (s)" when bytes.Length >= 4 =>
+                    DateTimeOffset.FromUnixTimeSeconds(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes)).ToString("u"),
+                "Unix Timestamp (ms)" when bytes.Length >= 8 =>
+                    DateTimeOffset.FromUnixTimeMilliseconds(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(bytes)).ToString("u"),
+                "Boolean" when bytes.Length >= 1 => bytes[0] != 0 ? "true" : "false",
+                "Protobuf (wire)" => FormatProtobufWire(bytes),
+                "MessagePack (hex)" => $"MsgPack ({bytes.Length} bytes): {BitConverter.ToString(bytes[..Math.Min(bytes.Length, 64)]).Replace("-", " ")}{(bytes.Length > 64 ? "..." : "")}",
+                "URL-Encoded" => System.Net.WebUtility.UrlEncode(System.Text.Encoding.UTF8.GetString(bytes)),
+                "Latin-1 String" => System.Text.Encoding.Latin1.GetString(bytes),
+                _ => $"Not enough bytes for {format} (have {bytes.Length})"
+            };
+        }
+        catch (Exception ex)
+        {
+            return $"Decode error ({format}): {ex.Message}";
+        }
+    }
+
+    private static string TryPrettyJson(byte[] bytes)
+    {
+        try
+        {
+            var text = System.Text.Encoding.UTF8.GetString(bytes);
+            var doc = System.Text.Json.JsonDocument.Parse(text);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+    }
+
+    private static string FormatProtobufWire(byte[] bytes)
+    {
+        // Simple protobuf wire-format dumper: field/wiretype + raw values
+        var sb = new System.Text.StringBuilder();
+        int pos = 0;
+        int fieldCount = 0;
+        while (pos < bytes.Length && fieldCount < 50)
+        {
+            int tag = 0, shift = 0;
+            while (pos < bytes.Length)
+            {
+                int b = bytes[pos++];
+                tag |= (b & 0x7F) << shift;
+                shift += 7;
+                if ((b & 0x80) == 0) break;
+            }
+            int fieldNum = tag >> 3;
+            int wireType = tag & 0x7;
+            sb.Append($"field {fieldNum} (wire {wireType}): ");
+            switch (wireType)
+            {
+                case 0: // varint
+                    long v = 0; shift = 0;
+                    while (pos < bytes.Length)
+                    {
+                        int b = bytes[pos++];
+                        v |= (long)(b & 0x7F) << shift;
+                        shift += 7;
+                        if ((b & 0x80) == 0) break;
+                    }
+                    sb.AppendLine(v.ToString());
+                    break;
+                case 1: // 64-bit
+                    if (pos + 8 <= bytes.Length)
+                    {
+                        sb.AppendLine(BitConverter.ToInt64(bytes, pos).ToString());
+                        pos += 8;
+                    }
+                    break;
+                case 2: // length-delimited
+                    int len = 0; shift = 0;
+                    while (pos < bytes.Length)
+                    {
+                        int b = bytes[pos++];
+                        len |= (b & 0x7F) << shift;
+                        shift += 7;
+                        if ((b & 0x80) == 0) break;
+                    }
+                    if (pos + len <= bytes.Length)
+                    {
+                        var chunk = bytes[pos..(pos + len)];
+                        var asStr = System.Text.Encoding.UTF8.GetString(chunk);
+                        sb.AppendLine(asStr.All(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t')
+                            ? $"\"{asStr}\""
+                            : $"({len} bytes) {BitConverter.ToString(chunk[..Math.Min(chunk.Length, 16)]).Replace("-", " ")}");
+                        pos += len;
+                    }
+                    break;
+                case 5: // 32-bit
+                    if (pos + 4 <= bytes.Length)
+                    {
+                        sb.AppendLine(BitConverter.ToInt32(bytes, pos).ToString());
+                        pos += 4;
+                    }
+                    break;
+                default:
+                    sb.AppendLine("(unknown wire type)");
+                    pos = bytes.Length;
+                    break;
+            }
+            fieldCount++;
+        }
+        return sb.Length > 0 ? sb.ToString().TrimEnd() : "(empty protobuf or not protobuf)";
+    }
 }

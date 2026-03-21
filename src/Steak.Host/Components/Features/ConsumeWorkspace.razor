@@ -14,7 +14,11 @@
 
     <div class="control-grid">
         <label>
-            <span>Topic</span>
+            <span>Topic <span class="tooltip-icon">?<span class="tooltip-text">Kafka topic to consume messages from.
+All partitions are read unless you select one below.
+Messages are exported in the order they arrive.
+Refresh Topics to reload the list from the cluster.
+You must select a topic before starting.</span></span></span>
             <select @bind="_selectedTopic">
                 <option value="">Select topic</option>
                 @foreach (var topic in _topics.OrderBy(t => t.Name))
@@ -24,11 +28,19 @@
             </select>
         </label>
         <label>
-            <span>Consumer Group</span>
+            <span>Consumer Group <span class="tooltip-icon">?<span class="tooltip-text">Kafka consumer group for offset tracking.
+Defaults to your username when left empty.
+Stored offsets let you resume where you stopped.
+Multiple consumers in the same group split work.
+Use a unique group to consume independently.</span></span></span>
             <input @bind="_groupId" placeholder="steak-export-orders" />
         </label>
         <label>
-            <span>Partition</span>
+            <span>Partition <span class="tooltip-icon">?<span class="tooltip-text">Limit consumption to a single partition.
+"All partitions" reads from every partition.
+Useful for targeted debugging or replay.
+Partition IDs are 0-based integers.
+List is populated from the selected topic.</span></span></span>
             <select @bind="_partitionValue">
                 <option value="">All partitions</option>
                 @if (SelectedTopicSummary is not null)
@@ -41,7 +53,11 @@
             </select>
         </label>
         <label>
-            <span>Offset Mode</span>
+            <span>Offset Mode <span class="tooltip-icon">?<span class="tooltip-text">Where to start reading in the partition.
+Earliest — read all messages from the beginning.
+Latest — only new messages after the consumer starts.
+Stored — resume from the last committed offset.
+Timestamp — start from a specific point in time.</span></span></span>
             <select @bind="_offsetMode">
                 @foreach (var mode in Enum.GetValues<MessageOffsetMode>())
                 {
@@ -50,18 +66,30 @@
             </select>
         </label>
         <label>
-            <span>Max Messages (0 = unlimited)</span>
+            <span>Max Messages (0 = unlimited) <span class="tooltip-icon">?<span class="tooltip-text">Stop consuming after this many messages.
+Set to 0 for unlimited (runs until stopped).
+Useful for sampling a fixed number of records.
+The consumer commits offsets when it stops.
+Combine with offset mode for precise replay.</span></span></span>
             <input type="number" @bind="_maxMessages" min="0" />
         </label>
         <label>
-            <span>Messages / second (0 = unlimited)</span>
+            <span>Messages / second (0 = unlimited) <span class="tooltip-icon">?<span class="tooltip-text">Throttle consumption to this rate.
+Set to 0 for maximum throughput.
+Useful to avoid overwhelming downstream systems.
+The actual rate may be slightly lower.
+Throttling is per consumer instance.</span></span></span>
             <input type="number" @bind="_messagesPerSecond" min="0" step="0.1" />
         </label>
     </div>
 
     <div class="control-grid">
         <label>
-            <span>Destination Transport</span>
+            <span>Destination Transport <span class="tooltip-icon">?<span class="tooltip-text">Where consumed messages are written.
+FileSystem — saves JSON files to a local folder.
+S3 — uploads JSON objects to an AWS S3 bucket.
+Each message becomes one file with metadata.
+File names include topic, partition, and timestamp.</span></span></span>
             <select @bind="_transportKind">
                 @foreach (var kind in Enum.GetValues<BatchTransportKind>())
                 {
@@ -73,38 +101,72 @@
         @if (_transportKind == BatchTransportKind.FileSystem)
         {
             <label>
-                <span>Folder Path</span>
-                <input @bind="_fsPath" placeholder="D:\KafkaExports" />
+                <span>Folder Path <span class="tooltip-icon">?<span class="tooltip-text">Local directory where exported files are saved.
+The folder is created automatically if it doesn't exist.
+Use the Browse button to pick a file as a hint.
+Each message is saved as a separate JSON file.
+Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
+                <div class="browse-row">
+                    <input @bind="_fsPath" placeholder="D:\KafkaExports" />
+                    <InputFile OnChange="OnFolderHintSelected" class="browse-input" id="consume-folder-picker" accept="*" />
+                    <label for="consume-folder-picker" class="ghost-button browse-button">Browse</label>
+                </div>
             </label>
         }
         else
         {
             <label>
-                <span>S3 Bucket</span>
+                <span>S3 Bucket <span class="tooltip-icon">?<span class="tooltip-text">Name of the AWS S3 bucket for exported messages.
+The bucket must already exist in your account.
+Steak writes one object per consumed message.
+Ensure the access key has s3:PutObject permission.
+Bucket names are globally unique in AWS.</span></span></span>
                 <input @bind="_s3Bucket" placeholder="my-bucket" />
             </label>
             <label>
-                <span>S3 Region</span>
+                <span>S3 Region <span class="tooltip-icon">?<span class="tooltip-text">AWS region where the S3 bucket is located.
+Must match the bucket's actual region.
+Examples: us-east-1, eu-west-1, ap-southeast-1.
+Using the wrong region causes access errors.
+Defaults to us-east-1 if left empty.</span></span></span>
                 <input @bind="_s3Region" placeholder="us-east-1" />
             </label>
             <label>
-                <span>S3 Prefix</span>
+                <span>S3 Prefix <span class="tooltip-icon">?<span class="tooltip-text">Key prefix for objects written to S3.
+Acts like a folder path inside the bucket.
+Example: exports/ puts files under that prefix.
+Trailing slash is recommended for clarity.
+Leave blank to write to the bucket root.</span></span></span>
                 <input @bind="_s3Prefix" placeholder="exports/" />
             </label>
             <label>
-                <span>Access Key</span>
+                <span>Access Key <span class="tooltip-icon">?<span class="tooltip-text">AWS IAM access key ID for S3 authentication.
+Part of an IAM user or role credential pair.
+Needs s3:PutObject permission on the target bucket.
+Stored in memory only — never persisted to disk.
+Use a dedicated service account for production.</span></span></span>
                 <input @bind="_s3AccessKey" />
             </label>
             <label>
-                <span>Secret Key</span>
+                <span>Secret Key <span class="tooltip-icon">?<span class="tooltip-text">AWS IAM secret access key paired with the above.
+Keep this value confidential at all times.
+Stored in memory only — never persisted to disk.
+Rotate keys regularly per AWS best practices.
+Use IAM roles instead of keys when possible.</span></span></span>
                 <input type="password" @bind="_s3SecretKey" />
             </label>
         }
     </div>
 
     <div class="button-row">
-        <button class="primary-button" disabled="@(!CanStart)" @onclick="StartAsync">Start Export</button>
-        <button class="ghost-button" disabled="@(!_jobStatus.IsRunning)" @onclick="StopAsync">Stop</button>
+        @if (_jobStatus.IsRunning)
+        {
+            <button class="stop-button" @onclick="StopAsync">&#9632; Stop Consuming</button>
+        }
+        else
+        {
+            <button class="start-button" disabled="@(!CanStart)" @onclick="StartAsync">&#9654; Start Consuming</button>
+        }
         <span class="status-pill @(_jobStatus.IsRunning ? "live" : "idle")">
             @(_jobStatus.IsRunning ? $"{_jobStatus.ExportedCount} written" : "Idle")
         </span>
@@ -142,6 +204,12 @@
     [Parameter]
     public string? ConnectionSessionId { get; set; }
 
+    [Parameter]
+    public EventCallback<string> OnSessionLost { get; set; }
+
+    [Parameter]
+    public string? Username { get; set; }
+
     private readonly List<KafkaTopicSummary> _topics = [];
     private ConsumeJobStatus _jobStatus = new();
     private string? _selectedTopic;
@@ -174,7 +242,8 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal))
+        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(ConnectionSessionId))
         {
             _loadedSessionId = ConnectionSessionId;
             await RefreshTopicsAsync().ConfigureAwait(false);
@@ -195,10 +264,15 @@
             {
                 _selectedTopic = _topics[0].Name;
                 if (string.IsNullOrWhiteSpace(_groupId))
-                    _groupId = $"steak-export-{_selectedTopic}";
+                    _groupId = !string.IsNullOrWhiteSpace(Username) ? Username : $"steak-export-{_selectedTopic}";
             }
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
+                await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
+        }
         finally { await InvokeAsync(StateHasChanged).ConfigureAwait(false); }
     }
 
@@ -274,4 +348,13 @@
     }
 
     public void Dispose() => ConsumeExportService.StateChanged -= HandleStateChanged;
+
+    private void OnFolderHintSelected(InputFileChangeEventArgs e)
+    {
+        // Browser file picker doesn't give true folder paths, but the selected file's
+        // name hints at the parent directory. We set the path so the user sees something.
+        var name = e.File?.Name;
+        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(_fsPath))
+            _fsPath = name;
+    }
 }

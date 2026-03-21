@@ -15,7 +15,11 @@
     <h3>Batch Publish</h3>
     <div class="control-grid">
         <label>
-            <span>Source Transport</span>
+            <span>Source Transport <span class="tooltip-icon">?<span class="tooltip-text">Where to read envelope files for batch publishing.
+FileSystem — reads JSON files from a local folder.
+S3 — reads JSON objects from an AWS S3 bucket.
+Files must be Steak envelope JSON format.
+Each file becomes one Kafka message.</span></span></span>
             <select @bind="_sourceTransport">
                 @foreach (var kind in Enum.GetValues<BatchTransportKind>())
                 {
@@ -27,21 +31,53 @@
         @if (_sourceTransport == BatchTransportKind.FileSystem)
         {
             <label>
-                <span>Source Folder</span>
-                <input @bind="_sourceFsPath" placeholder="D:\KafkaExports" />
+                <span>Source Folder <span class="tooltip-icon">?<span class="tooltip-text">Local directory containing Steak envelope JSON files.
+All .json files in the folder are read and published.
+Files are processed in alphabetical order.
+Use the Browse button to pick a file as a hint.
+Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
+                <div class="browse-row">
+                    <input @bind="_sourceFsPath" placeholder="D:\KafkaExports" />
+                    <InputFile OnChange="OnSourceFolderHintSelected" class="browse-input" id="publish-folder-picker" accept="*" />
+                    <label for="publish-folder-picker" class="ghost-button browse-button">Browse</label>
+                </div>
             </label>
         }
         else
         {
-            <label><span>S3 Bucket</span><input @bind="_sourceS3Bucket" /></label>
-            <label><span>S3 Region</span><input @bind="_sourceS3Region" placeholder="us-east-1" /></label>
-            <label><span>S3 Prefix</span><input @bind="_sourceS3Prefix" placeholder="exports/" /></label>
-            <label><span>Access Key</span><input @bind="_sourceS3AccessKey" /></label>
-            <label><span>Secret Key</span><input type="password" @bind="_sourceS3SecretKey" /></label>
+            <label><span>S3 Bucket <span class="tooltip-icon">?<span class="tooltip-text">Name of the S3 bucket containing envelope files.
+The bucket must exist and be accessible.
+Steak reads all .json objects matching the prefix.
+Needs s3:GetObject and s3:ListBucket permissions.
+Bucket names are globally unique in AWS.</span></span></span><input @bind="_sourceS3Bucket" /></label>
+            <label><span>S3 Region <span class="tooltip-icon">?<span class="tooltip-text">AWS region where the source S3 bucket is located.
+Must match the bucket's actual region.
+Examples: us-east-1, eu-west-1, ap-southeast-1.
+Using the wrong region causes access errors.
+Defaults to us-east-1 if left empty.</span></span></span><input @bind="_sourceS3Region" placeholder="us-east-1" /></label>
+            <label><span>S3 Prefix <span class="tooltip-icon">?<span class="tooltip-text">Key prefix to filter objects in the S3 bucket.
+Only objects matching this prefix are read.
+Example: exports/ reads files under that path.
+Leave blank to scan the entire bucket.
+Trailing slash is recommended for folder-like scoping.</span></span></span><input @bind="_sourceS3Prefix" placeholder="exports/" /></label>
+            <label><span>Access Key <span class="tooltip-icon">?<span class="tooltip-text">AWS IAM access key ID for reading from S3.
+Part of an IAM user or role credential pair.
+Needs s3:GetObject and s3:ListBucket permissions.
+Stored in memory only — never persisted to disk.
+Use a dedicated service account for production.</span></span></span><input @bind="_sourceS3AccessKey" /></label>
+            <label><span>Secret Key <span class="tooltip-icon">?<span class="tooltip-text">AWS IAM secret access key paired with the above.
+Keep this value confidential at all times.
+Stored in memory only — never persisted to disk.
+Rotate keys regularly per AWS best practices.
+Use IAM roles instead of keys when possible.</span></span></span><input type="password" @bind="_sourceS3SecretKey" /></label>
         }
 
         <label>
-            <span>Topic Override (optional)</span>
+            <span>Topic <span class="tooltip-icon">?<span class="tooltip-text">Override the topic for all published messages.
+"Use envelope topic" keeps each file's original topic.
+Selecting a topic overrides all envelopes' topics.
+Useful for replaying data into a different topic.
+Refresh Topics to reload the list from the cluster.</span></span></span>
             <select @bind="_batchTopicOverride">
                 <option value="">Use envelope topic</option>
                 @foreach (var topic in _topics.OrderBy(t => t.Name))
@@ -51,18 +87,40 @@
             </select>
         </label>
         <label>
-            <span>Max Messages (0 = unlimited)</span>
+            <span>Max Messages (0 = unlimited) <span class="tooltip-icon">?<span class="tooltip-text">Stop publishing after this many messages.
+Set to 0 for unlimited (publishes all files).
+Useful for testing with a subset of data.
+Counts individual messages, not files.
+Combine with Loop to repeat a fixed batch.</span></span></span>
             <input type="number" @bind="_batchMaxMessages" min="0" />
         </label>
         <label>
-            <span>Messages / second (0 = unlimited)</span>
+            <span>Messages / second (0 = unlimited) <span class="tooltip-icon">?<span class="tooltip-text">Throttle publishing to this rate.
+Set to 0 for maximum throughput.
+Useful to simulate realistic production load.
+The actual rate may be slightly lower.
+Throttling is per publish session.</span></span></span>
             <input type="number" @bind="_batchMps" min="0" step="0.1" />
+        </label>
+        <label class="checkbox-field">
+            <input type="checkbox" @bind="_batchLoop" />
+            <span>Loop (repeat when finished) <span class="tooltip-icon">?<span class="tooltip-text">Restart publishing from the first file when done.
+Runs indefinitely until you click Stop.
+Useful for load testing or continuous replay.
+Each loop re-reads all source files.
+Combine with messages/second to control rate.</span></span></span>
         </label>
     </div>
 
     <div class="button-row">
-        <button class="primary-button" disabled="@(!CanStartBatch)" @onclick="StartBatchAsync">Start Batch Publish</button>
-        <button class="ghost-button" disabled="@(!_batchStatus.IsRunning)" @onclick="StopBatchAsync">Stop</button>
+        @if (_batchStatus.IsRunning)
+        {
+            <button class="stop-button" @onclick="StopBatchAsync">&#9632; Stop Publishing</button>
+        }
+        else
+        {
+            <button class="start-button" disabled="@(!CanStartBatch)" @onclick="StartBatchAsync">&#9654; Start Publishing</button>
+        }
         <span class="status-pill @(_batchStatus.IsRunning ? "live" : "idle")">
             @(_batchStatus.IsRunning ? $"{_batchStatus.PublishedCount}/{_batchStatus.TotalEnvelopes} published" : "Idle")
         </span>
@@ -86,10 +144,14 @@
 
     <hr />
 
-    <h3>Single Envelope Publish</h3>
+    <h3>Single Message Publish</h3>
     <div class="control-grid">
         <label>
-            <span>Topic</span>
+            <span>Topic <span class="tooltip-icon">?<span class="tooltip-text">Target topic for the single message publish.
+The message will be produced to this topic.
+You must select a topic before publishing.
+Refresh Topics to reload the list from the cluster.
+The envelope JSON key/value is sent as-is.</span></span></span>
             <select @bind="_selectedTopic">
                 <option value="">Select topic</option>
                 @foreach (var topic in _topics.OrderBy(t => t.Name))
@@ -101,7 +163,11 @@
     </div>
 
     <label class="wide-field">
-        <span>Steak Envelope JSON</span>
+        <span>Steak Envelope JSON <span class="tooltip-icon">?<span class="tooltip-text">JSON representation of a Steak message envelope.
+Includes topic, key (base64), value (base64), and headers.
+Use "Load Sample" to see the expected format.
+"Pretty Format" re-indents the JSON for readability.
+"Preview" decodes base64 fields before publishing.</span></span></span>
         <textarea rows="16" class="json-editor" @bind="_envelopeJson"></textarea>
     </label>
 
@@ -154,6 +220,9 @@
     [Parameter]
     public string? ConnectionSessionId { get; set; }
 
+    [Parameter]
+    public EventCallback<string> OnSessionLost { get; set; }
+
     private readonly List<KafkaTopicSummary> _topics = [];
     private string? _selectedTopic;
     private string _envelopeJson = string.Empty;
@@ -175,12 +244,14 @@
     private int _batchMaxMessages;
     private double _batchMps;
     private string? _batchError;
+    private bool _batchLoop;
 
     private bool CanStartBatch => !string.IsNullOrWhiteSpace(ConnectionSessionId) && !_batchStatus.IsRunning;
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal))
+        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(ConnectionSessionId))
         {
             _loadedSessionId = ConnectionSessionId;
             await RefreshTopicsAsync().ConfigureAwait(false);
@@ -200,7 +271,12 @@
             _topics.AddRange(topics);
             _selectedTopic = _topics.FirstOrDefault()?.Name;
         }
-        catch (Exception ex) { _singleError = ex.Message; }
+        catch (Exception ex)
+        {
+            _singleError = ex.Message;
+            if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
+                await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
+        }
     }
 
     private BatchSourceOptions BuildSource() => _sourceTransport switch
@@ -239,7 +315,8 @@
                 Source = BuildSource(),
                 TopicOverride = string.IsNullOrWhiteSpace(_batchTopicOverride) ? null : _batchTopicOverride,
                 MaxMessages = _batchMaxMessages > 0 ? _batchMaxMessages : null,
-                MessagesPerSecond = _batchMps > 0 ? _batchMps : null
+                MessagesPerSecond = _batchMps > 0 ? _batchMps : null,
+                Loop = _batchLoop
             };
             _batchStatus = await BatchPublishService.StartAsync(request).ConfigureAwait(false);
         }
@@ -323,5 +400,12 @@
     {
         var envelope = System.Text.Json.JsonSerializer.Deserialize<SteakMessageEnvelope>(_envelopeJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         return envelope ?? throw new InvalidOperationException("The envelope editor is empty.");
+    }
+
+    private void OnSourceFolderHintSelected(InputFileChangeEventArgs e)
+    {
+        var name = e.File?.Name;
+        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(_sourceFsPath))
+            _sourceFsPath = name;
     }
 }

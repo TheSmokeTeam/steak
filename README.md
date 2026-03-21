@@ -13,16 +13,18 @@ Steak ships in three ways:
 - A Docker image
 - A normal `dotnet run` development workflow
 
-Steak does not persist Kafka credentials or connection profiles. You connect for the current session, work against that active session, and disconnect when you are done.
+Steak does not persist Kafka credentials or connection profiles. You can open multiple connection tabs for different Kafka clusters simultaneously, work against each active session, and disconnect individually when you are done.
 
 ## What You Can Do
 
 ### Connect and discover topics
 
-- Connect to plaintext Kafka with only `bootstrap.servers`, for example `localhost:9092`.
-- Connect to secured Kafka with SASL and SSL values from the UI.
+- Connect to Kafka using SASL authentication (username and password are required).
+- Open multiple connection tabs for different clusters at the same time.
+- Switch between connections instantly without reloading.
+- The client id defaults to your username when not explicitly set.
 - Refresh cluster metadata and list all visible topics from the connected broker.
-- Use friendly Kafka values such as `Plaintext`, `SaslPlaintext`, `SaslSsl`, `Plain`, `ScramSha256`, and `ScramSha512`.
+- Use friendly Kafka values such as `SaslPlaintext`, `SaslSsl`, `Plain`, `ScramSha256`, and `ScramSha512`.
 
 ### View messages
 
@@ -109,56 +111,61 @@ Steak opens your default browser automatically at `http://127.0.0.1:4040`.
 
 ## Local Kafka Quick Start
 
-### Kafka on the host
+The repository includes a `docker-compose.yml` that starts a SASL-authenticated Kafka broker with 10 pre-created topics.
 
-If Kafka is reachable from Windows directly:
-
-- Use `localhost:9092` in Steak.
-- Leave Security Protocol blank for plaintext.
-- Leave SASL Mechanism blank for plaintext.
-
-### Kafka in Docker
-
-Create a shared network:
+### Start Kafka with docker-compose
 
 ```powershell
-docker network create steak-net
+docker compose up -d
 ```
 
-Start Kafka:
+This starts Kafka on `localhost:9092` with SASL/PLAIN authentication and creates these topics automatically:
+
+| Topic | Partitions |
+|-------|------------|
+| `orders` | 3 |
+| `payments` | 2 |
+| `users` | 2 |
+| `notifications` | 1 |
+| `audit-log` | 3 |
+| `inventory.updates` | 2 |
+| `shipping.events` | 2 |
+| `analytics.clickstream` | 4 |
+| `platform.health` | 1 |
+| `customer.feedback` | 2 |
+
+### Connect from Steak
+
+Use these settings:
+
+| Field | Value |
+|-------|-------|
+| Bootstrap Servers | `localhost:9092` |
+| Username | `admin` |
+| Password | `admin` |
+| Security Protocol | `SaslPlaintext` (auto-detected) |
+| SASL Mechanism | `Plain` (auto-detected) |
+
+Security protocol and SASL mechanism default to `SaslPlaintext` and `Plain` when left blank.
+
+### Stop Kafka
 
 ```powershell
-docker run -d --name steak-kafka -h steak-kafka `
-  --network steak-net `
-  -p 9092:9092 `
-  -e KAFKA_NODE_ID=1 `
-  -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP='CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT' `
-  -e KAFKA_ADVERTISED_LISTENERS='PLAINTEXT://steak-kafka:29092,PLAINTEXT_HOST://localhost:9092' `
-  -e KAFKA_PROCESS_ROLES='broker,controller' `
-  -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 `
-  -e KAFKA_CONTROLLER_QUORUM_VOTERS='1@steak-kafka:29093' `
-  -e KAFKA_LISTENERS='PLAINTEXT://steak-kafka:29092,CONTROLLER://steak-kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092' `
-  -e KAFKA_INTER_BROKER_LISTENER_NAME='PLAINTEXT' `
-  -e KAFKA_CONTROLLER_LISTENER_NAMES='CONTROLLER' `
-  -e CLUSTER_ID='MkU3OEVBNTcwNTJENDM2Qk' `
-  confluentinc/cp-kafka:7.7.0
+docker compose down
 ```
-
-If Steak is running:
-
-- On Windows host: use `localhost:9092`
-- In Docker on `steak-net`: use `steak-kafka:29092`
 
 ## Using The UI
 
 ### Connect
 
-1. Enter bootstrap servers.
-2. Fill in SASL or SSL settings only if your cluster needs them.
-3. Click `Connect`.
-4. Use `Refresh Topics` to reload cluster metadata.
+1. Click `+ New Connection`.
+2. Enter bootstrap servers (e.g. `localhost:9092`).
+3. Enter username and password (required for all connections).
+4. Security protocol defaults to `SaslPlaintext` and mechanism to `Plain` when left blank.
+5. Click `Connect`.
+6. Use `Refresh Topics` to reload cluster metadata.
 
-If your local Docker Kafka is reachable, Steak should automatically discover all topics visible to the broker you connected to.
+You can open multiple connections by clicking `+ New Connection` again. Each connection appears as a tab. Click the `×` on a tab to disconnect from that cluster.
 
 ### View workspace
 
@@ -257,7 +264,9 @@ Key endpoints:
 | --------------------------- | ------ | -------------------- |
 | `/api/connection`           | POST   | Connect to Kafka     |
 | `/api/connection`           | GET    | Inspect session      |
-| `/api/connection`           | DELETE | Disconnect           |
+| `/api/connection/all`       | GET    | List all sessions    |
+| `/api/connection`           | DELETE | Disconnect all       |
+| `/api/connection/{id}`      | DELETE | Disconnect one       |
 | `/api/topics`               | GET    | List topics          |
 | `/api/topics/{name}`        | GET    | Topic details        |
 | `/api/view-sessions`        | POST   | Start live view      |

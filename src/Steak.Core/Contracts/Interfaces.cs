@@ -1,28 +1,38 @@
 namespace Steak.Core.Contracts;
 
 /// <summary>
-/// Manages the single active Kafka connection session.
+/// Manages multiple active Kafka connection sessions.
 /// All Kafka operations use the session's stored settings rather than saved profiles.
 /// </summary>
 public interface IConnectionSessionService
 {
     /// <summary>
-    /// Establishes a new connection session, replacing any existing one.
+    /// Establishes a new connection session (multiple sessions can be active simultaneously).
     /// </summary>
     ConnectResponse Connect(ConnectRequest request);
 
     /// <summary>
-    /// Disconnects and discards the active session.
+    /// Disconnects and discards all active sessions.
     /// </summary>
     void Disconnect();
 
     /// <summary>
-    /// Returns the current session status.
+    /// Disconnects and discards a specific session by id.
+    /// </summary>
+    void Disconnect(string connectionSessionId);
+
+    /// <summary>
+    /// Returns the status of the first active session (legacy compatibility).
     /// </summary>
     ConnectionSessionStatus GetStatus();
 
     /// <summary>
-    /// Retrieves the connection settings for the active session.
+    /// Returns all active sessions.
+    /// </summary>
+    IReadOnlyList<ConnectionSessionStatus> GetAllSessions();
+
+    /// <summary>
+    /// Retrieves the connection settings for a specific active session.
     /// Throws if no session is active.
     /// </summary>
     KafkaConnectionSettings GetActiveSettings(string connectionSessionId);

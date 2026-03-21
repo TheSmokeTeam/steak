@@ -13,10 +13,17 @@ internal sealed class KafkaTopicBrowserService(
     {
         var settings = sessionService.GetActiveSettings(connectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Admin);
+
+        // Use short timeouts to avoid hanging on unreachable brokers.
+        if (!config.ContainsKey("socket.timeout.ms"))
+            config["socket.timeout.ms"] = "5000";
+        if (!config.ContainsKey("request.timeout.ms"))
+            config["request.timeout.ms"] = "5000";
+
         using var adminClient = new AdminClientBuilder(config).Build();
 
         logger.LogInformation("Listing Kafka topics for session {SessionId}", connectionSessionId);
-        var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(10));
+        var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(5));
         var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
 
         IReadOnlyList<KafkaTopicSummary> result = metadata.Topics
@@ -31,10 +38,16 @@ internal sealed class KafkaTopicBrowserService(
     {
         var settings = sessionService.GetActiveSettings(connectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Admin);
+
+        if (!config.ContainsKey("socket.timeout.ms"))
+            config["socket.timeout.ms"] = "5000";
+        if (!config.ContainsKey("request.timeout.ms"))
+            config["request.timeout.ms"] = "5000";
+
         using var adminClient = new AdminClientBuilder(config).Build();
 
         logger.LogInformation("Fetching Kafka topic metadata for {Topic} in session {SessionId}", topic, connectionSessionId);
-        var metadata = adminClient.GetMetadata(topic, TimeSpan.FromSeconds(10));
+        var metadata = adminClient.GetMetadata(topic, TimeSpan.FromSeconds(5));
         var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
 
         var details = metadata.Topics.FirstOrDefault(candidate => string.Equals(candidate.Topic, topic, StringComparison.Ordinal));
@@ -60,4 +73,5 @@ internal sealed class KafkaTopicBrowserService(
                 .ToList()
         };
     }
+
 }

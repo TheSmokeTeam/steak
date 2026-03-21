@@ -12,6 +12,9 @@ artifacts/
 # Node-based UI smoke tooling
 node_modules/
 
+# Unused placeholder folders
+samples/
+
 # IDE and user-specific files
 .vs/
 *.user

@@ -3,15 +3,13 @@ using Steak.Core.Contracts;
 namespace Steak.Core.Services;
 
 /// <summary>
-/// Holds the single active Kafka connection session in memory. No persistence — session
-/// lives only as long as the app process.
+/// Holds multiple active Kafka connection sessions in memory. No persistence — sessions
+/// live only as long as the app process.
 /// </summary>
 internal sealed class ConnectionSessionService : IConnectionSessionService
 {
     private readonly object _sync = new();
-    private KafkaConnectionSettings? _settings;
-    private string? _sessionId;
-    private DateTimeOffset? _connectedAtUtc;
+    private readonly Dictionary<string, (KafkaConnectionSettings Settings, DateTimeOffset ConnectedAtUtc)> _sessions = new(StringComparer.Ordinal);
 
     public ConnectResponse Connect(ConnectRequest request)
     {
@@ -23,16 +21,31 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
             throw new InvalidOperationException("Bootstrap servers are required to connect.");
         }
 
+        if (string.IsNullOrWhiteSpace(request.Settings.Username))
+        {
+            throw new InvalidOperationException("Username is required to connect.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Settings.Password))
+        {
+            throw new InvalidOperationException("Password is required to connect.");
+        }
+
+        // Default client id to username when not explicitly set.
+        if (string.IsNullOrWhiteSpace(request.Settings.ClientId))
+        {
+            request.Settings.ClientId = request.Settings.Username.Trim();
+        }
+
+        var sessionId = Guid.NewGuid().ToString("N");
         lock (_sync)
         {
-            _sessionId = Guid.NewGuid().ToString("N");
-            _settings = request.Settings;
-            _connectedAtUtc = DateTimeOffset.UtcNow;
+            _sessions[sessionId] = (request.Settings, DateTimeOffset.UtcNow);
         }
 
         return new ConnectResponse
         {
-            ConnectionSessionId = _sessionId,
+            ConnectionSessionId = sessionId,
             BootstrapServers = request.Settings.BootstrapServers
         };
     }
@@ -41,9 +54,15 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
     {
         lock (_sync)
         {
-            _sessionId = null;
-            _settings = null;
-            _connectedAtUtc = null;
+            _sessions.Clear();
+        }
+    }
+
+    public void Disconnect(string connectionSessionId)
+    {
+        lock (_sync)
+        {
+            _sessions.Remove(connectionSessionId);
         }
     }
 
@@ -51,13 +70,37 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
     {
         lock (_sync)
         {
+            var first = _sessions.FirstOrDefault();
+            if (first.Key is null)
+            {
+                return new ConnectionSessionStatus();
+            }
+
             return new ConnectionSessionStatus
             {
-                IsConnected = _sessionId is not null,
-                ConnectionSessionId = _sessionId,
-                BootstrapServers = _settings?.BootstrapServers,
-                ConnectedAtUtc = _connectedAtUtc
+                IsConnected = true,
+                ConnectionSessionId = first.Key,
+                BootstrapServers = first.Value.Settings.BootstrapServers,
+                Username = first.Value.Settings.Username,
+                ConnectedAtUtc = first.Value.ConnectedAtUtc
             };
+        }
+    }
+
+    public IReadOnlyList<ConnectionSessionStatus> GetAllSessions()
+    {
+        lock (_sync)
+        {
+            return _sessions
+                .Select(kv => new ConnectionSessionStatus
+                {
+                    IsConnected = true,
+                    ConnectionSessionId = kv.Key,
+                    BootstrapServers = kv.Value.Settings.BootstrapServers,
+                    Username = kv.Value.Settings.Username,
+                    ConnectedAtUtc = kv.Value.ConnectedAtUtc
+                })
+                .ToList();
         }
     }
 
@@ -65,12 +108,12 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
     {
         lock (_sync)
         {
-            if (_sessionId is null || !string.Equals(_sessionId, connectionSessionId, StringComparison.Ordinal))
+            if (_sessions.TryGetValue(connectionSessionId, out var entry))
             {
-                throw new InvalidOperationException("No active connection session matches the supplied id. Connect first.");
+                return entry.Settings;
             }
 
-            return _settings!;
+            throw new InvalidOperationException("No active connection session matches the supplied id. Connect first.");
         }
     }
 }

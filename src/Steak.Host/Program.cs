@@ -22,7 +22,8 @@ public class Program
         var isContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         var runtimeOptions = builder.Configuration.GetSection("Steak:Runtime").Get<SteakRuntimeOptions>() ?? new SteakRuntimeOptions();
 
-        ConfigureUrls(builder, runtimeOptions, isContainer);
+        var port = ParsePort(args);
+        ConfigureUrls(builder, runtimeOptions, isContainer, port);
 
         var defaultDataRoot = ResolveDataRoot(builder.Environment, builder.Configuration, isContainer);
         var dataProtectionKeyRoot = Path.Combine(defaultDataRoot, "keys");
@@ -86,8 +87,15 @@ public class Program
         app.Run();
     }
 
-    private static void ConfigureUrls(WebApplicationBuilder builder, SteakRuntimeOptions runtimeOptions, bool isContainer)
+    private static void ConfigureUrls(WebApplicationBuilder builder, SteakRuntimeOptions runtimeOptions, bool isContainer, int? port)
     {
+        if (port.HasValue)
+        {
+            var host = isContainer ? "0.0.0.0" : "127.0.0.1";
+            builder.WebHost.UseUrls($"http://{host}:{port.Value}");
+            return;
+        }
+
         var explicitUrls = builder.Configuration["urls"] ?? builder.Configuration["ASPNETCORE_URLS"];
         if (!string.IsNullOrWhiteSpace(explicitUrls))
         {
@@ -95,6 +103,22 @@ public class Program
         }
 
         builder.WebHost.UseUrls(isContainer ? runtimeOptions.ContainerUrl : runtimeOptions.LocalUrl);
+    }
+
+    private static int? ParsePort(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--port" && i + 1 < args.Length && int.TryParse(args[i + 1], out var p))
+                return p;
+            if (args[i].StartsWith("--port=", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = args[i]["--port=".Length..];
+                if (int.TryParse(value, out var p2))
+                    return p2;
+            }
+        }
+        return null;
     }
 
     private static string ResolveDataRoot(IHostEnvironment environment, IConfiguration configuration, bool isContainer)

@@ -1,0 +1,58 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: steak-kafka
+    hostname: steak-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@steak-kafka:29093
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://steak-kafka:29093,INTERNAL://steak-kafka:29092
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,INTERNAL://steak-kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_LISTENER_NAME_SASL__PLAINTEXT_PLAIN_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin" user_admin="admin";'
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+    volumes:
+      - ./kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics",
+          "--bootstrap-server",
+          "steak-kafka:29092",
+          "--list",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.7.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating Kafka topics..."
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic orders --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic payments --partitions 2 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic users --partitions 2 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic notifications --partitions 1 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic audit-log --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic inventory.updates --partitions 2 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic shipping.events --partitions 2 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic analytics.clickstream --partitions 4 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic platform.health --partitions 1 --replication-factor 1
+        kafka-topics --bootstrap-server steak-kafka:29092 --create --if-not-exists --topic customer.feedback --partitions 2 --replication-factor 1
+        echo "All topics created."
+        kafka-topics --bootstrap-server steak-kafka:29092 --list

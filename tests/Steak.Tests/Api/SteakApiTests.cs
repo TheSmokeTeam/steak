@@ -57,7 +57,13 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     {
         using var client = _factory.CreateClient();
 
-        var response = await client.GetFromJsonAsync<List<KafkaTopicSummary>>("/api/topics?connectionSessionId=demo");
+        var connectResponse = await client.PostAsJsonAsync("/api/connection", new ConnectRequest
+        {
+            Settings = new KafkaConnectionSettings { BootstrapServers = "localhost:9092" }
+        });
+        var session = await connectResponse.Content.ReadFromJsonAsync<ConnectResponse>();
+
+        var response = await client.GetFromJsonAsync<List<KafkaTopicSummary>>($"/api/topics?connectionSessionId={session!.ConnectionSessionId}");
 
         Assert.NotNull(response);
         Assert.Single(response);
@@ -176,6 +182,111 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     }
 
     [Fact]
+    public async Task Health_ReturnsOk()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/health");
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Connect_MultipleConnections_ReturnsDistinctIds()
+    {
+        using var client = _factory.CreateClient();
+
+        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+        var r2 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-b:9092" } });
+
+        r1.EnsureSuccessStatusCode();
+        r2.EnsureSuccessStatusCode();
+
+        var c1 = await r1.Content.ReadFromJsonAsync<ConnectResponse>();
+        var c2 = await r2.Content.ReadFromJsonAsync<ConnectResponse>();
+
+        Assert.NotNull(c1);
+        Assert.NotNull(c2);
+        Assert.NotEqual(c1.ConnectionSessionId, c2.ConnectionSessionId);
+    }
+
+    [Fact]
+    public async Task GetAllConnections_ReturnsAllSessions()
+    {
+        using var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-b:9092" } });
+
+        var all = await client.GetFromJsonAsync<List<ConnectionSessionStatus>>("/api/connection/all");
+
+        Assert.NotNull(all);
+        Assert.True(all.Count >= 2);
+    }
+
+    [Fact]
+    public async Task DisconnectById_RemovesSpecificSession()
+    {
+        using var client = _factory.CreateClient();
+
+        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+        r1.EnsureSuccessStatusCode();
+        var c1 = await r1.Content.ReadFromJsonAsync<ConnectResponse>();
+        Assert.NotNull(c1);
+
+        var disconnect = await client.DeleteAsync($"/api/connection/{c1.ConnectionSessionId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, disconnect.StatusCode);
+    }
+
+    [Fact]
+    public async Task DisconnectAll_ClearsAllSessions()
+    {
+        using var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+
+        var disconnect = await client.DeleteAsync("/api/connection");
+        Assert.Equal(HttpStatusCode.NoContent, disconnect.StatusCode);
+
+        var status = await client.GetFromJsonAsync<ConnectionSessionStatus>("/api/connection");
+        Assert.NotNull(status);
+        Assert.False(status.IsConnected);
+    }
+
+    [Fact]
+    public async Task Topics_WithInvalidSession_ReturnsBadRequest()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/topics?connectionSessionId=nonexistent");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadAsStringAsync();
+        Assert.Contains("No active connection session", payload);
+    }
+
+    [Fact]
+    public async Task SingleTopic_WithInvalidSession_ReturnsBadRequest()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/topics/orders?connectionSessionId=nonexistent");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ViewSession_StopWithoutStart_ReturnsNoContent()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.DeleteAsync("/api/view-sessions");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
     public async Task BatchPublish_ReturnsStatus()
     {
         using var client = _factory.CreateClient();
@@ -215,7 +326,8 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
                 services.RemoveAll<IBatchPublishService>();
 
                 services.AddSingleton<IConnectionSessionService, FakeConnectionSessionService>();
-                services.AddSingleton<ITopicBrowserService, FakeTopicBrowserService>();
+                services.AddSingleton<ITopicBrowserService>(sp =>
+                    new FakeTopicBrowserService(sp.GetRequiredService<IConnectionSessionService>()));
                 services.AddSingleton<IViewSessionService, FakeViewSessionService>();
                 services.AddSingleton<IConsumeExportService, FakeConsumeExportService>();
                 services.AddSingleton<IMessagePublisher, FakeMessagePublisher>();
@@ -226,29 +338,40 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
 
     private sealed class FakeConnectionSessionService : IConnectionSessionService
     {
-        private string? _sessionId;
-        private KafkaConnectionSettings _settings = new();
+        private readonly Dictionary<string, KafkaConnectionSettings> _sessions = new(StringComparer.Ordinal);
 
         public ConnectResponse Connect(ConnectRequest request)
         {
-            _sessionId = Guid.NewGuid().ToString("N");
-            _settings = request.Settings;
-            return new ConnectResponse { ConnectionSessionId = _sessionId };
+            var id = Guid.NewGuid().ToString("N");
+            _sessions[id] = request.Settings;
+            return new ConnectResponse { ConnectionSessionId = id, BootstrapServers = request.Settings.BootstrapServers };
         }
 
-        public void Disconnect() => _sessionId = null;
+        public void Disconnect() => _sessions.Clear();
 
-        public ConnectionSessionStatus GetStatus() => new()
+        public void Disconnect(string connectionSessionId) => _sessions.Remove(connectionSessionId);
+
+        public ConnectionSessionStatus GetStatus()
         {
-            IsConnected = _sessionId is not null,
-            ConnectionSessionId = _sessionId,
-            BootstrapServers = _settings.BootstrapServers
-        };
+            var first = _sessions.FirstOrDefault();
+            return first.Key is null
+                ? new ConnectionSessionStatus()
+                : new ConnectionSessionStatus { IsConnected = true, ConnectionSessionId = first.Key, BootstrapServers = first.Value.BootstrapServers };
+        }
 
-        public KafkaConnectionSettings GetActiveSettings(string connectionSessionId) => _settings;
+        public IReadOnlyList<ConnectionSessionStatus> GetAllSessions() =>
+            _sessions.Select(kv => new ConnectionSessionStatus
+            {
+                IsConnected = true,
+                ConnectionSessionId = kv.Key,
+                BootstrapServers = kv.Value.BootstrapServers
+            }).ToList();
+
+        public KafkaConnectionSettings GetActiveSettings(string connectionSessionId) =>
+            _sessions.TryGetValue(connectionSessionId, out var s) ? s : throw new InvalidOperationException("No active connection session matches the supplied id. Connect first.");
     }
 
-    private sealed class FakeTopicBrowserService : ITopicBrowserService
+    private sealed class FakeTopicBrowserService(IConnectionSessionService sessionService) : ITopicBrowserService
     {
         private static readonly KafkaTopicSummary Topic = new()
         {
@@ -262,10 +385,16 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
         };
 
         public Task<IReadOnlyList<KafkaTopicSummary>> ListTopicsAsync(string connectionSessionId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<KafkaTopicSummary>>([Topic]);
+        {
+            sessionService.GetActiveSettings(connectionSessionId); // validates session exists
+            return Task.FromResult<IReadOnlyList<KafkaTopicSummary>>([Topic]);
+        }
 
         public Task<KafkaTopicSummary?> GetTopicAsync(string connectionSessionId, string topic, CancellationToken cancellationToken = default)
-            => Task.FromResult<KafkaTopicSummary?>(Topic);
+        {
+            sessionService.GetActiveSettings(connectionSessionId); // validates session exists
+            return Task.FromResult<KafkaTopicSummary?>(Topic);
+        }
     }
 
     private sealed class FakeViewSessionService : IViewSessionService

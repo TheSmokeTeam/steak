@@ -174,6 +174,11 @@ public sealed class ConnectionSessionStatus
     public string? BootstrapServers { get; set; }
 
     /// <summary>
+    /// Username used for the session.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
     /// UTC time the session was established.
     /// </summary>
     public DateTimeOffset? ConnectedAtUtc { get; set; }
@@ -305,6 +310,11 @@ public sealed class BatchPublishRequest
     /// Target throughput in messages per second. Zero or null means unlimited.
     /// </summary>
     public double? MessagesPerSecond { get; set; }
+
+    /// <summary>
+    /// When true, restart publishing from the beginning once all envelopes have been sent.
+    /// </summary>
+    public bool Loop { get; set; }
 }
 
 /// <summary>

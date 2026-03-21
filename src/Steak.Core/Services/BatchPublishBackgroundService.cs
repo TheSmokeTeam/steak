@@ -135,39 +135,46 @@ internal sealed class BatchPublishBackgroundService(
                 request.Source.TransportKind,
                 request.ConnectionSessionId);
 
-            await foreach (var envelope in reader.ReadEnvelopesAsync(request.Source, cancellationToken).ConfigureAwait(false))
+            do
             {
-                if (cancellationToken.IsCancellationRequested || publishedCount >= maxMessages)
-                    break;
-
-                discoveredCount++;
-                var normalized = envelopeFactory.NormalizeForPublish(envelope, request.ConnectionSessionId, request.TopicOverride);
-                var topic = normalized.Topic ?? throw new InvalidOperationException("Envelope is missing a topic.");
-
-                var message = new Message<byte[]?, byte[]>
+                await foreach (var envelope in reader.ReadEnvelopesAsync(request.Source, cancellationToken).ConfigureAwait(false))
                 {
-                    Key = normalized.KeyBase64 is not null ? Convert.FromBase64String(normalized.KeyBase64) : null,
-                    Value = Convert.FromBase64String(normalized.ValueBase64)
-                };
+                    if (cancellationToken.IsCancellationRequested || publishedCount >= maxMessages)
+                        break;
 
-                if (normalized.Headers.Count > 0)
-                {
-                    message.Headers = new Headers();
-                    foreach (var header in normalized.Headers)
+                    discoveredCount++;
+                    var normalized = envelopeFactory.NormalizeForPublish(envelope, request.ConnectionSessionId, request.TopicOverride);
+                    var topic = normalized.Topic ?? throw new InvalidOperationException("Envelope is missing a topic.");
+
+                    var message = new Message<byte[]?, byte[]>
                     {
-                        message.Headers.Add(header.Key, header.ValueBase64 is not null ? Convert.FromBase64String(header.ValueBase64) : null);
+                        Key = normalized.KeyBase64 is not null ? Convert.FromBase64String(normalized.KeyBase64) : null,
+                        Value = Convert.FromBase64String(normalized.ValueBase64)
+                    };
+
+                    if (normalized.Headers.Count > 0)
+                    {
+                        message.Headers = new Headers();
+                        foreach (var header in normalized.Headers)
+                        {
+                            message.Headers.Add(header.Key, header.ValueBase64 is not null ? Convert.FromBase64String(header.ValueBase64) : null);
+                        }
+                    }
+
+                    await producer.ProduceAsync(topic, message, cancellationToken).ConfigureAwait(false);
+                    publishedCount++;
+                    UpdateSuccess(startedAt, discoveredCount, publishedCount);
+
+                    if (interval > TimeSpan.Zero)
+                    {
+                        await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
                     }
                 }
 
-                await producer.ProduceAsync(topic, message, cancellationToken).ConfigureAwait(false);
-                publishedCount++;
-                UpdateSuccess(startedAt, discoveredCount, publishedCount);
-
-                if (interval > TimeSpan.Zero)
-                {
-                    await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
-                }
+                if (publishedCount >= maxMessages)
+                    break;
             }
+            while (request.Loop && !cancellationToken.IsCancellationRequested);
 
             producer.Flush(TimeSpan.FromSeconds(10));
         }
