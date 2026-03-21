@@ -105,4 +105,4 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: ${{ steps.docker-tags.outputs.image }}
           short-description: Self-hosted Kafka viewer, exporter, and publisher.
-          readme-filepath: ./dockerhub-description.md
+          readme-filepath: ./README.md

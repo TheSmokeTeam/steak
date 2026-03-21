@@ -3,3 +3,9 @@
 .git/
 .vs/
 TestResults/
+artifacts/
+verification-data/
+node_modules/
+.dotnet/
+.nuget/
+samples/

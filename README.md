@@ -61,12 +61,12 @@ Steps:
 1. Download the latest release assets.
 2. Extract `Steak-win-x64-portable.zip` to a folder of your choice.
 3. Run `Steak.exe`.
-4. Open `http://127.0.0.1:4040` in your browser.
+4. Steak opens your default browser automatically at `http://127.0.0.1:4040`.
 
 Notes:
 
 - The Windows build is self-contained. No .NET runtime installation is required.
-- Steak no longer auto-opens your browser. It starts in the background and waits for you to open the URL yourself.
+- Steak auto-opens your default browser when it starts outside Docker.
 - Steak stores mutable data in the first writable location it can use:
   `%LOCALAPPDATA%\\Steak`, then `.steak` next to the executable, then `.steak` under the content root, then the system temp folder.
 
@@ -95,7 +95,7 @@ Open:
 Notes:
 
 - The container stores exported data under `/data` by default.
-- Browser auto-launch is disabled in Docker mode.
+- Browser auto-launch stays disabled in Docker mode.
 - If Kafka is also running in Docker, put Steak and Kafka on the same network and use the Kafka container hostname.
 
 ### 3. Source mode (`dotnet run`)
@@ -105,7 +105,7 @@ dotnet restore
 dotnet run --project .\src\Steak.Host\Steak.Host.csproj
 ```
 
-Open `http://127.0.0.1:4040`.
+Steak opens your default browser automatically at `http://127.0.0.1:4040`.
 
 ## Local Kafka Quick Start
 

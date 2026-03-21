@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
 
 COPY Steak.sln ./
@@ -9,9 +9,15 @@ RUN dotnet restore src/Steak.Host/Steak.Host.csproj
 
 COPY src ./src
 COPY tests ./tests
-RUN dotnet publish src/Steak.Host/Steak.Host.csproj -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish src/Steak.Host/Steak.Host.csproj \
+    -c Release \
+    --no-restore \
+    -o /app/publish \
+    /p:UseAppHost=false \
+    /p:DebugType=None \
+    /p:DebugSymbols=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 ENV Steak__Runtime__LaunchBrowser=false
