@@ -55,6 +55,21 @@ public sealed class KafkaConfigurationServiceTests
     }
 
     [Fact]
+    public void BuildConfig_NormalizesBootstrapServerLists()
+    {
+        var settings = new KafkaConnectionSettings
+        {
+            BootstrapServers = " broker-a:9092, broker-b:9092 ,,broker-c:9092 "
+        };
+
+        var service = new KafkaConfigurationService();
+
+        var config = service.BuildConfig(settings, KafkaClientKind.Consumer);
+
+        Assert.Equal("broker-a:9092,broker-b:9092,broker-c:9092", config["bootstrap.servers"]);
+    }
+
+    [Fact]
     public void GetMaskedConfig_MasksSensitiveValues()
     {
         var settings = new KafkaConnectionSettings

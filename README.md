@@ -330,9 +330,9 @@ Key endpoints:
 
 ## Release Notes
 
-- Version `1.0.0` is the first stable release line.
-- Pushing the Git tag `1.0.0` triggers the Windows release workflow and publishes the GitHub release assets.
-- The same `1.0.0` tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
+- Version `1.0.1` is the current stable release line.
+- Pushing the Git tag `1.0.1` triggers the Windows release workflow and publishes the GitHub release assets.
+- The same `1.0.1` tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
 
 ## Steak Envelope Format
 

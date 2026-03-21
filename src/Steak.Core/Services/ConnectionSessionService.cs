@@ -16,6 +16,8 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Settings);
 
+        request.Settings.BootstrapServers = NormalizeBootstrapServers(request.Settings.BootstrapServers);
+
         if (string.IsNullOrWhiteSpace(request.Settings.BootstrapServers))
         {
             throw new InvalidOperationException("Bootstrap servers are required to connect.");
@@ -125,5 +127,17 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
 
             throw new InvalidOperationException("No active connection session matches the supplied id. Connect first.");
         }
+    }
+
+    private static string NormalizeBootstrapServers(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            ",",
+            value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
     }
 }

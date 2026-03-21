@@ -25,9 +25,15 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
             throw new InvalidOperationException("Bootstrap servers are required.");
         }
 
+        var bootstrapServers = NormalizeBootstrapServers(settings.BootstrapServers);
+        if (string.IsNullOrWhiteSpace(bootstrapServers))
+        {
+            throw new InvalidOperationException("Bootstrap servers are required.");
+        }
+
         var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["bootstrap.servers"] = settings.BootstrapServers.Trim()
+            ["bootstrap.servers"] = bootstrapServers
         };
 
         AddIfPresent(config, "client.id", settings.ClientId);
@@ -134,5 +140,17 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
         }
 
         return value.Length <= 8 ? new string('*', value.Length) : $"{value[..2]}***{value[^2..]}";
+    }
+
+    private static string NormalizeBootstrapServers(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            ",",
+            value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
     }
 }

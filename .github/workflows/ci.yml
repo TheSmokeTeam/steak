@@ -55,11 +55,11 @@ jobs:
         id: release-tag
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME}" == "1.0.0" ]]; then
+          if [[ "${GITHUB_REF_NAME}" == "1.0.1" ]]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Tag '${GITHUB_REF_NAME}' is not the 1.0.0 release tag. Skipping Docker image publish."
+            echo "Tag '${GITHUB_REF_NAME}' is not the 1.0.1 release tag. Skipping Docker image publish."
           fi
 
       - name: Set Docker tags

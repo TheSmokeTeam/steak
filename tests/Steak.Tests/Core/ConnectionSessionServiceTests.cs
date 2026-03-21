@@ -53,6 +53,17 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
+    public void Connect_NormalizesBootstrapServerLists()
+    {
+        var response = ConnectDefault(" broker-a:9092, broker-b:9092 ,,broker-c:9092 ");
+
+        var settings = _service.GetActiveSettings(response.ConnectionSessionId);
+
+        Assert.Equal("broker-a:9092,broker-b:9092,broker-c:9092", settings.BootstrapServers);
+        Assert.Equal("broker-a:9092,broker-b:9092,broker-c:9092", response.BootstrapServers);
+    }
+
+    [Fact]
     public void Connect_PreservesExplicitClientId()
     {
         _service.Connect(new ConnectRequest

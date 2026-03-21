@@ -6,7 +6,7 @@ on:
       keep_tag:
         description: Version tag to keep alongside latest
         required: true
-        default: 1.0.0
+        default: 1.0.1
 
 env:
   DOCKER_REPOSITORY_NAME: steak
