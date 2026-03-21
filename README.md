@@ -49,12 +49,12 @@ Steak does not persist Kafka credentials or connection profiles. You connect for
 
 This is the mode to use if you want a Windows executable without installing the .NET runtime or SDK.
 
-Each Git tag produces a GitHub release with:
+Windows downloads include:
 
 - `Steak.exe`
 - `Steak-win-x64-portable.zip`
 
-The recommended release asset is `Steak-win-x64-portable.zip`. It contains the full published layout. `Steak.exe` is also attached separately from the same build.
+The recommended download is `Steak-win-x64-portable.zip`. It contains the full published layout. `Steak.exe` is also available separately.
 
 Steps:
 
@@ -294,87 +294,3 @@ Notes:
 - `keyBase64` and `valueBase64` are raw bytes encoded as base64.
 - Preview fields are derived inside Steak.
 - Batch publish can respect the envelope topic or override it from the UI.
-
-## Verification Scripts
-
-### Full Kafka smoke
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\local-kafka-smoke.ps1
-```
-
-This validates:
-
-- topic discovery
-- view sessions
-- single publish
-- consume export
-- batch publish
-- end-to-end Kafka round-trips
-
-### Headless UI smoke
-
-```powershell
-npm install
-npm run ui-smoke
-```
-
-This validates the main UI workflows without opening a visible browser window.
-
-Optional environment variables:
-
-- `BASE_URL` to target a different Steak host
-- `KAFKA_BOOTSTRAP_SERVERS` to target Kafka reachable from that host
-- `UI_BACKEND_EXPORT_DIR` for the path Steak should write to
-- `UI_EXPECTED_EXPORT_DIR` for the path the smoke test should inspect on the machine running Playwright
-
-### Standalone executable smoke
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify-standalone.ps1
-```
-
-This validates:
-
-- the published `artifacts\publish\win-x64\Steak.exe`
-- an isolated copy of only `Steak.exe`
-
-### Full `.exe` workflow smoke against local Kafka
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-exe-smoke.ps1
-```
-
-This starts the published `Steak.exe`, runs the Kafka API smoke, runs the headless UI smoke, and stops the process again.
-
-## CI And Releases
-
-### Continuous integration
-
-`.github/workflows/ci.yml` runs on pushes to `main`, pull requests to `main`, and tag pushes.
-
-It:
-
-- restores, builds, and tests the solution
-- publishes Docker images to `<DOCKER_USERNAME>/steak`
-- uses Docker Hub credentials from:
-  - `DOCKER_USERNAME`
-  - `DOCKER_PASSWORD`
-
-Docker tags:
-
-- `latest`
-- the GitHub Actions run number
-- the Git tag name on tag builds
-
-### GitHub releases
-
-`.github/workflows/release.yml` runs on every pushed tag.
-
-It:
-
-- builds and tests the app on Windows
-- publishes the self-contained Windows executable
-- runs the standalone smoke test
-- attaches `Steak.exe` to the GitHub release
-- attaches `Steak-win-x64-portable.zip` to the GitHub release
