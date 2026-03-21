@@ -455,7 +455,10 @@ label span {
   color: #0a1f12;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .start-button:hover {
@@ -479,7 +482,10 @@ label span {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .stop-button:hover {
@@ -890,11 +896,37 @@ code {
   white-space: normal;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   z-index: 999;
-  transition: opacity 0.15s ease, visibility 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease;
   pointer-events: none;
 }
 
 .tooltip-icon:hover .tooltip-text {
   visibility: visible;
   opacity: 1;
+}
+
+/* Topic tiles: bigger names */
+.topic-tile strong {
+  font-size: 1.15rem;
+}
+
+/* Message rows: bigger preview text */
+.message-row strong {
+  font-size: 1.05rem;
+}
+
+/* Partition metadata: smaller */
+.metadata-list .meta-card {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.metadata-list .meta-card strong {
+  font-size: 0.82rem;
+}
+
+.metadata-list .meta-card span {
+  font-size: 0.78rem;
 }

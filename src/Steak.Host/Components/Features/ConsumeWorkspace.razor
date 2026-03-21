@@ -217,7 +217,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
     private string _partitionValue = string.Empty;
     private string? _error;
     private string? _loadedSessionId;
-    private MessageOffsetMode _offsetMode = MessageOffsetMode.Latest;
+    private MessageOffsetMode _offsetMode = MessageOffsetMode.Earliest;
 
     private BatchTransportKind _transportKind = BatchTransportKind.FileSystem;
     private string _fsPath = string.Empty;
@@ -232,7 +232,9 @@ Use IAM roles instead of keys when possible.</span></span></span>
     private KafkaTopicSummary? SelectedTopicSummary => _topics.FirstOrDefault(t => t.Name == _selectedTopic);
     private bool CanStart => !string.IsNullOrWhiteSpace(ConnectionSessionId)
         && !string.IsNullOrWhiteSpace(_selectedTopic)
-        && !string.IsNullOrWhiteSpace(_groupId);
+        && !string.IsNullOrWhiteSpace(_groupId)
+        && (_transportKind != BatchTransportKind.FileSystem || !string.IsNullOrWhiteSpace(_fsPath))
+        && (_transportKind != BatchTransportKind.S3 || !string.IsNullOrWhiteSpace(_s3Bucket));
 
     protected override void OnInitialized()
     {

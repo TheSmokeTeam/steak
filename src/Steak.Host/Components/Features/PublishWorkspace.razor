@@ -172,7 +172,7 @@ Use "Load Sample" to see the expected format.
     </label>
 
     <div class="button-row">
-        <button class="primary-button" disabled="@string.IsNullOrWhiteSpace(ConnectionSessionId)" @onclick="PublishAsync">Publish</button>
+        <button class="primary-button" disabled="@(string.IsNullOrWhiteSpace(ConnectionSessionId) || string.IsNullOrWhiteSpace(_selectedTopic))" @onclick="PublishAsync">Publish</button>
         <button class="ghost-button" @onclick="PreviewAsync">Preview</button>
         <button class="ghost-button" @onclick="FormatAsync">Pretty Format</button>
         <button class="ghost-button" @onclick="ResetTemplate">Load Sample</button>
@@ -246,7 +246,10 @@ Use "Load Sample" to see the expected format.
     private string? _batchError;
     private bool _batchLoop;
 
-    private bool CanStartBatch => !string.IsNullOrWhiteSpace(ConnectionSessionId) && !_batchStatus.IsRunning;
+    private bool CanStartBatch => !string.IsNullOrWhiteSpace(ConnectionSessionId)
+        && !_batchStatus.IsRunning
+        && (_sourceTransport != BatchTransportKind.FileSystem || !string.IsNullOrWhiteSpace(_sourceFsPath))
+        && (_sourceTransport != BatchTransportKind.S3 || !string.IsNullOrWhiteSpace(_sourceS3Bucket));
 
     protected override async Task OnParametersSetAsync()
     {

@@ -378,7 +378,7 @@ Does not affect what is consumed from Kafka.</span></span></span>
                 Partition = int.TryParse(_selectedPartitionValue, out var p) ? p : null,
                 OffsetMode = _offsetMode,
                 GroupId = string.IsNullOrWhiteSpace(_groupId) ? null : _groupId.Trim(),
-                MaxMessages = 250
+                MaxMessages = 0
             };
             _sessionStatus = await ViewSessionService.StartAsync(request).ConfigureAwait(false);
             _selectedMessage = _sessionStatus.RecentMessages.LastOrDefault();
@@ -392,7 +392,11 @@ Does not affect what is consumed from Kafka.</span></span></span>
         _sessionStatus = ViewSessionService.Snapshot;
     }
 
-    private void SelectTopic(string topic) => _selectedTopic = topic;
+    private void SelectTopic(string topic)
+    {
+        _selectedTopic = topic;
+        _offsetMode = MessageOffsetMode.Earliest;
+    }
 
     private void HandleStateChanged(object? sender, EventArgs e)
     {
