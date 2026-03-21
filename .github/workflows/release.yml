@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --verbosity normal
+
+      - name: Publish standalone exe
+        run: dotnet publish .\src\Steak.Host\Steak.Host.csproj -c Release -p:PublishProfile=Steak-win-x64
+
+      - name: Verify standalone smoke
+        shell: pwsh
+        run: .\scripts\verify-standalone.ps1
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'artifacts\release'
+          $zipPath = Join-Path $releaseDir 'Steak-win-x64-portable.zip'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path .\artifacts\publish\win-x64\* -DestinationPath $zipPath
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/publish/win-x64/Steak.exe
+            artifacts/release/Steak-win-x64-portable.zip

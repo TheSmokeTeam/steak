@@ -5,6 +5,7 @@ obj/
 # Test and local verification artifacts
 TestResults/
 verification-data/
+artifacts/
 
 # Node-based UI smoke tooling
 node_modules/

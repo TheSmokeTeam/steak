@@ -18,5 +18,5 @@ public sealed class SteakRuntimeOptions
     /// <summary>
     /// Opens the system browser automatically when Steak starts outside a container.
     /// </summary>
-    public bool LaunchBrowser { get; set; } = true;
+    public bool LaunchBrowser { get; set; } = false;
 }

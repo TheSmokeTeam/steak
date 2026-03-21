@@ -67,7 +67,7 @@ public class Program
 
         app.UseAntiforgery();
 
-        app.MapStaticAssets();
+        app.UseStaticFiles();
         app.MapSteakApi();
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();

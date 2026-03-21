@@ -4,9 +4,12 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:4040";
+const bootstrapServers = process.env.KAFKA_BOOTSTRAP_SERVERS ?? "localhost:9092";
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const exportDir = process.env.UI_EXPORT_DIR ?? path.join(repoRoot, "verification-data", "smoke-exports-ui");
+const backendExportDir = process.env.UI_BACKEND_EXPORT_DIR ?? exportDir;
+const expectedExportDir = process.env.UI_EXPECTED_EXPORT_DIR ?? exportDir;
 const timeoutMs = Number(process.env.UI_SMOKE_TIMEOUT_MS ?? 30000);
 
 async function waitFor(check, description, timeout = timeoutMs, intervalMs = 1000) {
@@ -56,8 +59,8 @@ async function openWorkspaceTab(page, tabName, markerText) {
   await page.getByRole("heading", { name: markerText, exact: true }).waitFor({ state: "visible", timeout: timeoutMs });
 }
 
-await fs.rm(exportDir, { recursive: true, force: true });
-await fs.mkdir(exportDir, { recursive: true });
+await fs.rm(expectedExportDir, { recursive: true, force: true });
+await fs.mkdir(expectedExportDir, { recursive: true });
 
 const consoleErrors = [];
 const pageErrors = [];
@@ -82,6 +85,13 @@ page.on("requestfailed", (request) => {
 });
 
 try {
+  console.log("== Resetting Steak session");
+  try {
+    await fetch(`${baseUrl}/api/connection`, { method: "DELETE" });
+  } catch {
+    // Ignore cleanup failures and let the UI path handle the current state.
+  }
+
   console.log("== Opening Steak UI");
   await page.goto(baseUrl, { waitUntil: "networkidle", timeout: timeoutMs });
 
@@ -90,10 +100,18 @@ try {
     throw new Error(`Unexpected brand image source: ${brandSrc ?? "<null>"}`);
   }
 
+  const connectButton = page.getByRole("button", { name: "Connect" });
   const disconnectButton = page.getByRole("button", { name: "Disconnect" });
+  await waitFor(
+    async () =>
+      ((await connectButton.count()) > 0 && (await connectButton.isVisible())) ||
+      ((await disconnectButton.count()) > 0 && (await disconnectButton.isVisible())),
+    "connection controls to render"
+  );
+
   if ((await disconnectButton.count()) > 0 && (await disconnectButton.isVisible())) {
     await disconnectButton.click();
-    await page.getByRole("button", { name: "Connect" }).waitFor({ state: "visible", timeout: timeoutMs });
+    await connectButton.waitFor({ state: "visible", timeout: timeoutMs });
   }
 
   console.log("== Verifying connection form");
@@ -104,12 +122,11 @@ try {
   await advancedSummary.click();
 
   const bootstrapInput = page.locator('input[placeholder="broker-1:9092,broker-2:9092"]');
-  const connectButton = page.getByRole("button", { name: "Connect" });
   await bootstrapInput.evaluate((element, value) => {
     element.value = value;
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
-  }, "localhost:9092");
+  }, bootstrapServers);
   await waitFor(async () => await connectButton.isEnabled(), "connect button to become enabled");
   await connectButton.click();
   await page.getByRole("button", { name: "Disconnect" }).waitFor({ state: "visible", timeout: timeoutMs });
@@ -165,10 +182,10 @@ try {
   await page.getByLabel("Consumer Group").fill(`ui-smoke-${Date.now()}`);
   await selectAndVerify(page.getByLabel("Offset Mode"), "Earliest", "consume offset mode");
   await page.getByLabel("Max Messages (0 = unlimited)").fill("2");
-  await page.getByLabel("Folder Path").fill(exportDir);
+  await page.getByLabel("Folder Path").fill(backendExportDir);
   await page.getByRole("button", { name: "Start Export" }).click();
   await waitFor(
-    async () => (await countJsonFiles(exportDir)) >= 2,
+    async () => (await countJsonFiles(expectedExportDir)) >= 2,
     "consume workspace to export files"
   );
 
@@ -179,7 +196,7 @@ try {
   console.log("== Exercising batch publish");
   await openWorkspaceTab(page, "Publish", "Batch & single publish");
   await page.getByRole("button", { name: "Refresh Topics" }).click();
-  await page.getByLabel("Source Folder").fill(exportDir);
+  await page.getByLabel("Source Folder").fill(backendExportDir);
   await selectAndVerify(page.locator('label:has-text("Topic Override") select'), "payments", "batch topic override");
   await page.getByLabel("Max Messages (0 = unlimited)").fill("2");
   await page.getByRole("button", { name: "Start Batch Publish" }).click();
@@ -232,8 +249,10 @@ try {
     JSON.stringify(
       {
         baseUrl,
-        exportDir,
-        exportedFileCount: await countJsonFiles(exportDir),
+        bootstrapServers,
+        backendExportDir,
+        expectedExportDir,
+        exportedFileCount: await countJsonFiles(expectedExportDir),
         brandSrc
       },
       null,

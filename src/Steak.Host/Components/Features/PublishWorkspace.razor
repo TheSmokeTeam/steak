@@ -222,7 +222,7 @@
             TransportKind = BatchTransportKind.FileSystem,
             FileSystem = new FileSystemLocationOptions
             {
-                Path = string.IsNullOrWhiteSpace(_sourceFsPath) ? null : _sourceFsPath.Trim()
+                Path = string.IsNullOrWhiteSpace(_sourceFsPath) ? string.Empty : _sourceFsPath.Trim()
             }
         }
     };
