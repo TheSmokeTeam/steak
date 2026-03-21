@@ -1,0 +1,113 @@
+name: Docker Hub Cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_tag:
+        description: Version tag to keep alongside latest
+        required: true
+        default: 1.0.0-alpha.1
+
+env:
+  DOCKER_REPOSITORY_NAME: steak
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete old Docker Hub tags
+        shell: bash
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          KEEP_TAG: ${{ github.event.inputs.keep_tag }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          username = os.environ["DOCKER_USERNAME"]
+          password = os.environ["DOCKER_PASSWORD"]
+          keep_tag = os.environ["KEEP_TAG"]
+          repository = os.environ["DOCKER_REPOSITORY_NAME"]
+          namespace = username
+
+          login_body = json.dumps({
+              "username": username,
+              "password": password,
+          }).encode("utf-8")
+
+          login_request = urllib.request.Request(
+              "https://hub.docker.com/v2/users/login/",
+              data=login_body,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+
+          with urllib.request.urlopen(login_request) as response:
+              login_payload = json.loads(response.read().decode("utf-8"))
+
+          token = login_payload.get("token") or login_payload.get("access_token")
+          if not token:
+              raise RuntimeError("Docker Hub login did not return a token.")
+
+          def request_json(url: str):
+              request = urllib.request.Request(url, method="GET")
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def delete_tag(tag_name: str):
+              url = f"https://hub.docker.com/v2/namespaces/{namespace}/repositories/{repository}/tags/{urllib.parse.quote(tag_name)}/"
+              for scheme in ("JWT", "Bearer"):
+                  request = urllib.request.Request(
+                      url,
+                      headers={"Authorization": f"{scheme} {token}"},
+                      method="DELETE",
+                  )
+                  try:
+                      with urllib.request.urlopen(request) as response:
+                          if response.status in (200, 202, 204):
+                              return True
+                  except urllib.error.HTTPError as error:
+                      if error.code in (401, 403):
+                          continue
+                      if error.code == 404:
+                          return True
+                      raise
+
+              return False
+
+          keep = {"latest", keep_tag}
+          next_url = f"https://hub.docker.com/v2/namespaces/{namespace}/repositories/{repository}/tags?page_size=100"
+          tags = []
+
+          while next_url:
+              payload = request_json(next_url)
+              tags.extend(tag["name"] for tag in payload.get("results", []))
+              next_url = payload.get("next")
+
+          to_delete = [tag for tag in tags if tag not in keep]
+          failed = []
+
+          for tag in to_delete:
+              if delete_tag(tag):
+                  print(f"deleted:{tag}")
+              else:
+                  print(f"failed:{tag}")
+                  failed.append(tag)
+
+          remaining_payload = request_json(
+              f"https://hub.docker.com/v2/namespaces/{namespace}/repositories/{repository}/tags?page_size=100"
+          )
+          remaining = [tag["name"] for tag in remaining_payload.get("results", [])]
+          print("remaining=" + ",".join(remaining))
+
+          if failed:
+              print("Cleanup failed for: " + ", ".join(failed), file=sys.stderr)
+              sys.exit(1)
+          PY
