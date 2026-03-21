@@ -1,0 +1,109 @@
+using System.Text.Json.Serialization;
+using Steak.Core.Contracts;
+using Steak.Core.Services;
+using Steak.Host.Api;
+using Steak.Host.Components;
+using Steak.Host.Configuration;
+
+namespace Steak.Host;
+
+/// <summary>
+/// Application entry point for the self-hosted Steak UI and API.
+/// </summary>
+public class Program
+{
+    /// <summary>
+    /// Boots the ASP.NET Core host, the Blazor UI, and the local API surface.
+    /// </summary>
+    public static void Main(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+        var isContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+        var runtimeOptions = builder.Configuration.GetSection("Steak:Runtime").Get<SteakRuntimeOptions>() ?? new SteakRuntimeOptions();
+
+        ConfigureUrls(builder, runtimeOptions, isContainer);
+
+        var defaultDataRoot = ResolveDataRoot(builder.Environment, builder.Configuration, isContainer);
+
+        builder.Services.Configure<SteakRuntimeOptions>(builder.Configuration.GetSection("Steak:Runtime"));
+        builder.Services.PostConfigure<SteakRuntimeOptions>(options =>
+        {
+            options.LocalUrl = string.IsNullOrWhiteSpace(options.LocalUrl) ? runtimeOptions.LocalUrl : options.LocalUrl;
+            options.ContainerUrl = string.IsNullOrWhiteSpace(options.ContainerUrl) ? runtimeOptions.ContainerUrl : options.ContainerUrl;
+        });
+        builder.Services.PostConfigure<SteakStorageOptions>(options =>
+        {
+            if (string.IsNullOrWhiteSpace(options.DataRoot))
+            {
+                options.DataRoot = defaultDataRoot;
+            }
+        });
+
+        builder.Services.AddProblemDetails();
+        builder.Services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        });
+        builder.Services.AddRazorComponents()
+            .AddInteractiveServerComponents();
+        builder.Services.AddOpenApi();
+        builder.Services.AddSwaggerGen();
+        builder.Services.AddSteakCore(builder.Configuration);
+        builder.Services.AddHostedService<BrowserLaunchHostedService>();
+
+        var app = builder.Build();
+
+        // Keep the runtime local-first but still expose enough diagnostics for a trusted operator workflow.
+        app.UseExceptionHandler();
+        app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+        app.MapOpenApi("/openapi/{documentName}.json");
+        app.UseSwaggerUI(options =>
+        {
+            options.RoutePrefix = "swagger";
+            options.SwaggerEndpoint("/openapi/v1.json", "Steak API v1");
+            options.DocumentTitle = "Steak API";
+        });
+
+        app.UseAntiforgery();
+
+        app.MapStaticAssets();
+        app.MapSteakApi();
+        app.MapRazorComponents<App>()
+            .AddInteractiveServerRenderMode();
+
+        app.Run();
+    }
+
+    private static void ConfigureUrls(WebApplicationBuilder builder, SteakRuntimeOptions runtimeOptions, bool isContainer)
+    {
+        var explicitUrls = builder.Configuration["urls"] ?? builder.Configuration["ASPNETCORE_URLS"];
+        if (!string.IsNullOrWhiteSpace(explicitUrls))
+        {
+            return;
+        }
+
+        builder.WebHost.UseUrls(isContainer ? runtimeOptions.ContainerUrl : runtimeOptions.LocalUrl);
+    }
+
+    private static string ResolveDataRoot(IHostEnvironment environment, IConfiguration configuration, bool isContainer)
+    {
+        var configured = configuration["Steak:Storage:DataRoot"];
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        if (isContainer)
+        {
+            return "/data";
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Steak");
+        }
+
+        return Path.Combine(environment.ContentRootPath, ".steak");
+    }
+}

@@ -1,0 +1,38 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<section class="surface inner-surface">
+    <p class="section-kicker">Runtime</p>
+    <h1>Something interrupted Steak</h1>
+    <p class="hero-copy">The host reported an unexpected error while serving the current request. Reload the workspace or return to the home screen and try the action again.</p>
+
+    @if (ShowRequestId)
+    {
+        <div class="meta-card">
+            <strong>Request ID</strong>
+            <span>@RequestId</span>
+        </div>
+    }
+
+    <div class="helper-list">
+        <span>Use the browser reload button if the UI lost its live connection.</span>
+        <span>Enable the <code>Development</code> environment locally when you need detailed exception pages.</span>
+    </div>
+
+    <div class="button-row">
+        <a class="primary-button" href="/">Back to Steak</a>
+    </div>
+</section>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

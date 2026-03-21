@@ -1,0 +1,319 @@
+@implements IDisposable
+@inject ITopicBrowserService TopicBrowserService
+@inject IViewSessionService ViewSessionService
+
+<div class="workspace-panel">
+    <div class="panel-header">
+        <div>
+            <p class="section-kicker">View</p>
+            <h2>Live message viewer</h2>
+        </div>
+        <button class="ghost-button" disabled="@string.IsNullOrWhiteSpace(ConnectionSessionId)" @onclick="RefreshTopicsAsync">Refresh Topics</button>
+    </div>
+
+    <div class="control-grid">
+        <label>
+            <span>Topic Filter</span>
+            <input @bind="_topicFilter" placeholder="search topics" />
+        </label>
+        <label>
+            <span>Topic</span>
+            <select @bind="_selectedTopic">
+                <option value="">Select topic</option>
+                @foreach (var topic in FilteredTopics)
+                {
+                    <option value="@topic.Name">@topic.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Partition</span>
+            <select @bind="_selectedPartitionValue">
+                <option value="">All partitions</option>
+                @if (SelectedTopicSummary is not null)
+                {
+                    @foreach (var partition in SelectedTopicSummary.Partitions)
+                    {
+                        <option value="@partition.PartitionId">@partition.PartitionId</option>
+                    }
+                }
+            </select>
+        </label>
+        <label>
+            <span>Offset Mode</span>
+            <select @bind="_offsetMode">
+                @foreach (var mode in Enum.GetValues<MessageOffsetMode>())
+                {
+                    <option value="@mode">@mode</option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Group Id (optional)</span>
+            <input @bind="_groupId" placeholder="leave blank for ephemeral viewer" />
+        </label>
+        <label>
+            <span>Message Filter</span>
+            <input @bind="_messageFilter" placeholder="search recent payloads" />
+        </label>
+    </div>
+
+    <div class="button-row">
+        <button class="primary-button" disabled="@(!CanStart)" @onclick="StartAsync">Start Live View</button>
+        <button class="ghost-button" disabled="@(!_sessionStatus.IsRunning)" @onclick="StopAsync">Stop</button>
+        <span class="status-pill @(_sessionStatus.IsRunning ? "live" : "idle")">
+            @(_sessionStatus.IsRunning ? $"Streaming {_sessionStatus.ReceivedCount} messages" : "Idle")
+        </span>
+    </div>
+
+    <div class="metric-grid">
+        <div class="metric-card"><strong>Topics</strong><span>@_topics.Count loaded</span></div>
+        <div class="metric-card"><strong>Buffered messages</strong><span>@_sessionStatus.RecentMessages.Count shown</span></div>
+        <div class="metric-card"><strong>Selected partition</strong><span>@(string.IsNullOrWhiteSpace(_selectedPartitionValue) ? "All" : _selectedPartitionValue)</span></div>
+        <div class="metric-card"><strong>Offset mode</strong><span>@_offsetMode</span></div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="inline-alert danger">@_error</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_sessionStatus.LastError))
+    {
+        <div class="inline-alert danger">@_sessionStatus.LastError</div>
+    }
+
+    <div class="workspace-columns">
+        <section class="surface inner-surface">
+            <div class="section-heading">
+                <div><p class="section-kicker">Topics</p><h3>Connected session</h3></div>
+            </div>
+            <div class="topic-list">
+                @if (string.IsNullOrWhiteSpace(ConnectionSessionId))
+                {
+                    <div class="empty-state compact">Connect first.</div>
+                }
+                else if (_loadingTopics)
+                {
+                    <div class="empty-state compact">Loading topic metadata...</div>
+                }
+                else if (FilteredTopics.Count == 0)
+                {
+                    <div class="empty-state compact">No topics match the current filter.</div>
+                }
+                else
+                {
+                    @foreach (var topic in FilteredTopics)
+                    {
+                        <button class="topic-tile @(topic.Name == _selectedTopic ? "active" : null)" @onclick="@(() => SelectTopic(topic.Name))">
+                            <strong>@topic.Name</strong>
+                            <span>@topic.PartitionCount partition(s)</span>
+                        </button>
+                    }
+                }
+            </div>
+            @if (SelectedTopicSummary is not null)
+            {
+                <div class="metadata-list">
+                    @foreach (var partition in SelectedTopicSummary.Partitions)
+                    {
+                        <div class="meta-card">
+                            <strong>Partition @partition.PartitionId</strong>
+                            <span>Leader: @partition.Leader</span>
+                            <span>ISR: @string.Join(", ", partition.InSyncReplicas)</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="surface inner-surface">
+            <div class="section-heading">
+                <div><p class="section-kicker">Recent messages</p><h3>@(_sessionStatus.Topic ?? "No active session")</h3></div>
+                <span class="muted-label">@_sessionStatus.RecentMessages.Count buffered</span>
+            </div>
+            <div class="message-table">
+                @if (FilteredMessages.Count == 0)
+                {
+                    <div class="empty-state compact">Start a view session to see recent messages here.</div>
+                }
+                else
+                {
+                    @foreach (var message in FilteredMessages)
+                    {
+                        <button class="message-row @(ReferenceEquals(message, _selectedMessage) ? "active" : null)"
+                                @onclick="@(() => _selectedMessage = message)">
+                            <span>@message.Partition:@message.Offset</span>
+                            <strong>@(message.Preview?.ValueUtf8Preview ?? message.ValueBase64[..Math.Min(message.ValueBase64.Length, 42)])</strong>
+                            <span>@message.TimestampUtc?.ToLocalTime().ToString("u")</span>
+                            <span>@message.Headers.Count header(s) · @(message.Preview?.ValueIsJson == true ? "JSON" : message.Preview?.ValueIsUtf8 == true ? "UTF-8" : "Binary")</span>
+                        </button>
+                    }
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="surface detail-surface">
+        <div class="section-heading">
+            <div><p class="section-kicker">Inspector</p><h3>@(_selectedMessage?.Topic ?? "Select a message")</h3></div>
+        </div>
+        @if (_selectedMessage is null)
+        {
+            <div class="empty-state">Choose a message to inspect its offsets, headers, base64, text, and JSON previews.</div>
+        }
+        else
+        {
+            <div class="detail-grid">
+                <div class="meta-card"><strong>Topic</strong><span>@_selectedMessage.Topic</span></div>
+                <div class="meta-card"><strong>Partition</strong><span>@_selectedMessage.Partition</span></div>
+                <div class="meta-card"><strong>Offset</strong><span>@_selectedMessage.Offset</span></div>
+                <div class="meta-card"><strong>Timestamp</strong><span>@_selectedMessage.TimestampUtc?.ToLocalTime().ToString("u")</span></div>
+                <div class="meta-card"><strong>Headers</strong><span>@_selectedMessage.Headers.Count</span></div>
+                <div class="meta-card"><strong>Payload</strong><span>@(_selectedMessage.Preview?.ValueIsJson == true ? "JSON" : _selectedMessage.Preview?.ValueIsUtf8 == true ? "UTF-8" : "Binary")</span></div>
+            </div>
+            <div class="detail-columns">
+                <div>
+                    <h4>Headers</h4>
+                    <div class="header-list">
+                        @if (_selectedMessage.Headers.Count == 0)
+                        {
+                            <div class="empty-state compact">No headers.</div>
+                        }
+                        else
+                        {
+                            @foreach (var header in _selectedMessage.Headers)
+                            {
+                                <div class="header-card">
+                                    <strong>@header.Key</strong>
+                                    <span>base64: @header.ValueBase64</span>
+                                    @if (!string.IsNullOrWhiteSpace(header.Utf8Preview)) { <span>utf8: @header.Utf8Preview</span> }
+                                    @if (!string.IsNullOrWhiteSpace(header.HexPreview)) { <span>hex: @header.HexPreview</span> }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+                <div>
+                    <h4>Key + Body</h4>
+                    <div class="code-stack">
+                        <label><span>Key Base64</span><textarea readonly rows="3">@(_selectedMessage.KeyBase64 ?? "No key")</textarea></label>
+                        <label><span>Key UTF-8</span><textarea readonly rows="3">@(_selectedMessage.Preview?.KeyUtf8Preview ?? "Binary or no key")</textarea></label>
+                        <label><span>Key Hex</span><textarea readonly rows="3">@(_selectedMessage.Preview?.KeyHexPreview ?? "No key")</textarea></label>
+                        <label><span>Value Base64</span><textarea readonly rows="4">@_selectedMessage.ValueBase64</textarea></label>
+                        <label><span>UTF-8 Preview</span><textarea readonly rows="4">@(_selectedMessage.Preview?.ValueUtf8Preview ?? "Binary or invalid UTF-8")</textarea></label>
+                        <label><span>Pretty JSON</span><textarea readonly rows="6">@(_selectedMessage.Preview?.ValuePrettyJson ?? "Not valid JSON")</textarea></label>
+                        <label><span>Hex Preview</span><textarea readonly rows="6">@_selectedMessage.Preview?.ValueHexPreview</textarea></label>
+                    </div>
+                </div>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter]
+    public string? ConnectionSessionId { get; set; }
+
+    private readonly List<KafkaTopicSummary> _topics = [];
+    private ViewSessionStatus _sessionStatus = new();
+    private SteakMessageEnvelope? _selectedMessage;
+    private string? _selectedTopic;
+    private string _selectedPartitionValue = string.Empty;
+    private string _topicFilter = string.Empty;
+    private string _messageFilter = string.Empty;
+    private string _groupId = string.Empty;
+    private bool _loadingTopics;
+    private string? _loadedSessionId;
+    private string? _error;
+    private MessageOffsetMode _offsetMode = MessageOffsetMode.Latest;
+
+    private KafkaTopicSummary? SelectedTopicSummary => _topics.FirstOrDefault(t => t.Name == _selectedTopic);
+    private bool CanStart => !string.IsNullOrWhiteSpace(ConnectionSessionId) && !string.IsNullOrWhiteSpace(_selectedTopic);
+
+    private List<KafkaTopicSummary> FilteredTopics => _topics
+        .Where(t => string.IsNullOrWhiteSpace(_topicFilter) || t.Name.Contains(_topicFilter, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(t => t.Name).ToList();
+
+    private List<SteakMessageEnvelope> FilteredMessages => _sessionStatus.RecentMessages
+        .Where(m => string.IsNullOrWhiteSpace(_messageFilter)
+            || m.ValueBase64.Contains(_messageFilter, StringComparison.OrdinalIgnoreCase)
+            || (m.Preview?.ValueUtf8Preview?.Contains(_messageFilter, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (m.Topic?.Contains(_messageFilter, StringComparison.OrdinalIgnoreCase) ?? false))
+        .OrderByDescending(m => m.Offset).ToList();
+
+    protected override void OnInitialized()
+    {
+        _sessionStatus = ViewSessionService.Snapshot;
+        ViewSessionService.StateChanged += HandleStateChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal))
+        {
+            _loadedSessionId = ConnectionSessionId;
+            await RefreshTopicsAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task RefreshTopicsAsync()
+    {
+        _topics.Clear();
+        _selectedTopic ??= string.Empty;
+        _error = null;
+        if (string.IsNullOrWhiteSpace(ConnectionSessionId)) return;
+
+        try
+        {
+            _loadingTopics = true;
+            var topics = await TopicBrowserService.ListTopicsAsync(ConnectionSessionId).ConfigureAwait(false);
+            _topics.AddRange(topics);
+            if (_topics.Count > 0 && !_topics.Any(t => t.Name == _selectedTopic))
+                _selectedTopic = _topics[0].Name;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally
+        {
+            _loadingTopics = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        if (!CanStart || string.IsNullOrWhiteSpace(ConnectionSessionId)) return;
+        _error = null;
+        try
+        {
+            var request = new StartViewSessionRequest
+            {
+                ConnectionSessionId = ConnectionSessionId,
+                Topic = _selectedTopic!,
+                Partition = int.TryParse(_selectedPartitionValue, out var p) ? p : null,
+                OffsetMode = _offsetMode,
+                GroupId = string.IsNullOrWhiteSpace(_groupId) ? null : _groupId.Trim(),
+                MaxMessages = 250
+            };
+            _sessionStatus = await ViewSessionService.StartAsync(request).ConfigureAwait(false);
+            _selectedMessage = _sessionStatus.RecentMessages.LastOrDefault();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task StopAsync()
+    {
+        await ViewSessionService.StopAsync().ConfigureAwait(false);
+        _sessionStatus = ViewSessionService.Snapshot;
+    }
+
+    private void SelectTopic(string topic) => _selectedTopic = topic;
+
+    private void HandleStateChanged(object? sender, EventArgs e)
+    {
+        _sessionStatus = ViewSessionService.Snapshot;
+        _selectedMessage ??= _sessionStatus.RecentMessages.LastOrDefault();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => ViewSessionService.StateChanged -= HandleStateChanged;
+}

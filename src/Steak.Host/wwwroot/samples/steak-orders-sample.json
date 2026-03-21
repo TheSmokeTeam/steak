@@ -1,0 +1,16 @@
+{
+  "app": "Steak",
+  "topic": "steak.orders.verify",
+  "keyBase64": "b3JkZXItNDI=",
+  "valueBase64": "eyJvcmRlcklkIjo0Miwic3RhdHVzIjoicXVldWVkIiwic291cmNlIjoiU3RlYWsgc2FtcGxlIn0=",
+  "headers": [
+    {
+      "key": "content-type",
+      "valueBase64": "YXBwbGljYXRpb24vanNvbg=="
+    },
+    {
+      "key": "x-demo",
+      "valueBase64": "c3RlYWstc2FtcGxl"
+    }
+  ]
+}

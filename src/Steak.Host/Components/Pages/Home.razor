@@ -1,0 +1,172 @@
+@page "/"
+
+<PageTitle>Steak</PageTitle>
+
+<div class="workspace-shell">
+    <section class="connection-card surface">
+        <div class="connection-header">
+            <div>
+                <p class="section-kicker">Connection</p>
+                <h2>@(_connectionStatus.IsConnected ? _connectionStatus.BootstrapServers : "Not connected")</h2>
+            </div>
+            <div class="connection-actions">
+                <a class="ghost-button" href="/swagger" target="_blank" rel="noreferrer">Swagger</a>
+                @if (_connectionStatus.IsConnected)
+                {
+                    <button class="danger-button" @onclick="DisconnectAsync">Disconnect</button>
+                }
+            </div>
+        </div>
+
+        @if (!_connectionStatus.IsConnected)
+        {
+            <div class="connect-form">
+                <div class="form-grid">
+                    <label>
+                        <span>Bootstrap Servers</span>
+                        <input @bind="_settings.BootstrapServers" placeholder="broker-1:9092,broker-2:9092" />
+                    </label>
+                    <label>
+                        <span>Username</span>
+                        <input @bind="_settings.Username" />
+                    </label>
+                    <label>
+                        <span>Password</span>
+                        <input type="password" @bind="_settings.Password" />
+                    </label>
+                    <label>
+                        <span>Security Protocol</span>
+                        <input @bind="_settings.SecurityProtocol" placeholder="SaslPlaintext" />
+                    </label>
+                    <label>
+                        <span>SASL Mechanism</span>
+                        <input @bind="_settings.SaslMechanism" placeholder="ScramSha512" />
+                    </label>
+                    <label>
+                        <span>Client Id</span>
+                        <input @bind="_settings.ClientId" placeholder="steak-ui" />
+                    </label>
+                </div>
+
+                <details class="advanced-toggle">
+                    <summary>Advanced settings</summary>
+                    <div class="form-grid">
+                        <label>
+                            <span>SSL CA PEM</span>
+                            <textarea rows="3" @bind="_settings.SslCaPem"></textarea>
+                        </label>
+                        <label>
+                            <span>SSL Certificate PEM</span>
+                            <textarea rows="3" @bind="_settings.SslCertificatePem"></textarea>
+                        </label>
+                        <label>
+                            <span>SSL Key PEM</span>
+                            <textarea rows="3" @bind="_settings.SslKeyPem"></textarea>
+                        </label>
+                        <label>
+                            <span>SSL Key Password</span>
+                            <input type="password" @bind="_settings.SslKeyPassword" />
+                        </label>
+                    </div>
+                    <label class="wide-field">
+                        <span>Advanced Overrides (key=value per line)</span>
+                        <textarea rows="3" @bind="_advancedOverrideText" placeholder="request.timeout.ms=10000"></textarea>
+                    </label>
+                </details>
+
+                <div class="button-row">
+                    <button class="primary-button" @onclick="ConnectAsync" disabled="@string.IsNullOrWhiteSpace(_settings.BootstrapServers)">Connect</button>
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="inline-alert danger">@_error</div>
+        }
+    </section>
+
+    @if (_connectionStatus.IsConnected)
+    {
+        <section class="surface workspace-surface">
+            <div class="tab-strip" role="tablist" aria-label="Steak workspaces">
+                <button class="@GetTabClass("view")" @onclick="@(() => _activeTab = "view")">View</button>
+                <button class="@GetTabClass("consume")" @onclick="@(() => _activeTab = "consume")">Consume</button>
+                <button class="@GetTabClass("publish")" @onclick="@(() => _activeTab = "publish")">Publish</button>
+            </div>
+
+            @if (_activeTab == "view")
+            {
+                <ViewWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
+            }
+            else if (_activeTab == "consume")
+            {
+                <ConsumeWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
+            }
+            else
+            {
+                <PublishWorkspace ConnectionSessionId="@_connectionStatus.ConnectionSessionId" />
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private string _activeTab = "view";
+    private string? _error;
+    private string _advancedOverrideText = string.Empty;
+    private KafkaConnectionSettings _settings = new();
+    private ConnectionSessionStatus _connectionStatus = new();
+
+    [Inject]
+    private IConnectionSessionService SessionService { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        _connectionStatus = SessionService.GetStatus();
+    }
+
+    private Task ConnectAsync()
+    {
+        try
+        {
+            _error = null;
+            if (!string.IsNullOrWhiteSpace(_advancedOverrideText))
+            {
+                _settings.AdvancedOverrides = KeyValueTextParser.Parse(_advancedOverrideText);
+            }
+
+            var response = SessionService.Connect(new ConnectRequest { Settings = _settings });
+            _connectionStatus = SessionService.GetStatus();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task DisconnectAsync()
+    {
+        try
+        {
+            SessionService.Disconnect();
+            _connectionStatus = SessionService.GetStatus();
+            _settings = new KafkaConnectionSettings();
+            _advancedOverrideText = string.Empty;
+            _error = null;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private string GetTabClass(string tab)
+    {
+        return _activeTab == tab ? "tab-button active" : "tab-button";
+    }
+}

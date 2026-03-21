@@ -1,0 +1,10 @@
+{
+  "name": "steak-smoke-tests",
+  "private": true,
+  "scripts": {
+    "ui-smoke": "node ./scripts/ui-smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

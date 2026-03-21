@@ -1,0 +1,327 @@
+@inject IMessagePublisher MessagePublisher
+@inject IMessagePreviewService MessagePreviewService
+@inject ITopicBrowserService TopicBrowserService
+@inject IBatchPublishService BatchPublishService
+
+<div class="workspace-panel">
+    <div class="panel-header">
+        <div>
+            <p class="section-kicker">Publish</p>
+            <h2>Batch &amp; single publish</h2>
+        </div>
+        <button class="ghost-button" disabled="@string.IsNullOrWhiteSpace(ConnectionSessionId)" @onclick="RefreshTopicsAsync">Refresh Topics</button>
+    </div>
+
+    <h3>Batch Publish</h3>
+    <div class="control-grid">
+        <label>
+            <span>Source Transport</span>
+            <select @bind="_sourceTransport">
+                @foreach (var kind in Enum.GetValues<BatchTransportKind>())
+                {
+                    <option value="@kind">@kind</option>
+                }
+            </select>
+        </label>
+
+        @if (_sourceTransport == BatchTransportKind.FileSystem)
+        {
+            <label>
+                <span>Source Folder</span>
+                <input @bind="_sourceFsPath" placeholder="D:\KafkaExports" />
+            </label>
+        }
+        else
+        {
+            <label><span>S3 Bucket</span><input @bind="_sourceS3Bucket" /></label>
+            <label><span>S3 Region</span><input @bind="_sourceS3Region" placeholder="us-east-1" /></label>
+            <label><span>S3 Prefix</span><input @bind="_sourceS3Prefix" placeholder="exports/" /></label>
+            <label><span>Access Key</span><input @bind="_sourceS3AccessKey" /></label>
+            <label><span>Secret Key</span><input type="password" @bind="_sourceS3SecretKey" /></label>
+        }
+
+        <label>
+            <span>Topic Override (optional)</span>
+            <select @bind="_batchTopicOverride">
+                <option value="">Use envelope topic</option>
+                @foreach (var topic in _topics.OrderBy(t => t.Name))
+                {
+                    <option value="@topic.Name">@topic.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Max Messages (0 = unlimited)</span>
+            <input type="number" @bind="_batchMaxMessages" min="0" />
+        </label>
+        <label>
+            <span>Messages / second (0 = unlimited)</span>
+            <input type="number" @bind="_batchMps" min="0" step="0.1" />
+        </label>
+    </div>
+
+    <div class="button-row">
+        <button class="primary-button" disabled="@(!CanStartBatch)" @onclick="StartBatchAsync">Start Batch Publish</button>
+        <button class="ghost-button" disabled="@(!_batchStatus.IsRunning)" @onclick="StopBatchAsync">Stop</button>
+        <span class="status-pill @(_batchStatus.IsRunning ? "live" : "idle")">
+            @(_batchStatus.IsRunning ? $"{_batchStatus.PublishedCount}/{_batchStatus.TotalEnvelopes} published" : "Idle")
+        </span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_batchError))
+    {
+        <div class="inline-alert danger">@_batchError</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_batchStatus.LastError))
+    {
+        <div class="inline-alert danger">@_batchStatus.LastError</div>
+    }
+
+    <div class="metric-grid">
+        <div class="metric-card"><strong>Published</strong><span>@_batchStatus.PublishedCount</span></div>
+        <div class="metric-card"><strong>Total</strong><span>@_batchStatus.TotalEnvelopes</span></div>
+        <div class="metric-card"><strong>Throughput</strong><span>@_batchStatus.CurrentMessagesPerSecond.ToString("F1") msg/s</span></div>
+        <div class="metric-card"><strong>Started</strong><span>@(_batchStatus.StartedAtUtc?.ToLocalTime().ToString("u") ?? "-")</span></div>
+    </div>
+
+    <hr />
+
+    <h3>Single Envelope Publish</h3>
+    <div class="control-grid">
+        <label>
+            <span>Topic</span>
+            <select @bind="_selectedTopic">
+                <option value="">Select topic</option>
+                @foreach (var topic in _topics.OrderBy(t => t.Name))
+                {
+                    <option value="@topic.Name">@topic.Name</option>
+                }
+            </select>
+        </label>
+    </div>
+
+    <label class="wide-field">
+        <span>Steak Envelope JSON</span>
+        <textarea rows="16" class="json-editor" @bind="_envelopeJson"></textarea>
+    </label>
+
+    <div class="button-row">
+        <button class="primary-button" disabled="@string.IsNullOrWhiteSpace(ConnectionSessionId)" @onclick="PublishAsync">Publish</button>
+        <button class="ghost-button" @onclick="PreviewAsync">Preview</button>
+        <button class="ghost-button" @onclick="FormatAsync">Pretty Format</button>
+        <button class="ghost-button" @onclick="ResetTemplate">Load Sample</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_singleError))
+    {
+        <div class="inline-alert danger">@_singleError</div>
+    }
+    @if (_publishResult is not null)
+    {
+        <div class="inline-alert success">Delivered to @_publishResult.Topic partition @_publishResult.Partition at offset @_publishResult.Offset.</div>
+    }
+
+    <div class="workspace-columns">
+        <section class="surface inner-surface">
+            <div class="section-heading"><div><p class="section-kicker">Preview</p><h3>Decoded payload</h3></div></div>
+            @if (_preview is null)
+            {
+                <div class="empty-state compact">Use Preview to inspect base64, UTF-8, JSON, and hex output before publishing.</div>
+            }
+            else
+            {
+                <div class="code-stack">
+                    <label><span>Key UTF-8</span><textarea readonly rows="3">@(_preview.KeyUtf8Preview ?? "Binary or no key")</textarea></label>
+                    <label><span>UTF-8 Preview</span><textarea readonly rows="4">@(_preview.ValueUtf8Preview ?? "Binary or invalid UTF-8")</textarea></label>
+                    <label><span>Pretty JSON</span><textarea readonly rows="5">@(_preview.ValuePrettyJson ?? "Not valid JSON")</textarea></label>
+                    <label><span>Hex Preview</span><textarea readonly rows="5">@_preview.ValueHexPreview</textarea></label>
+                </div>
+            }
+        </section>
+        <section class="surface inner-surface">
+            <div class="section-heading"><div><p class="section-kicker">Delivery</p><h3>Last publish result</h3></div></div>
+            <div class="metadata-list">
+                <div class="meta-card"><strong>Status</strong><span>@(_publishResult?.Status ?? "Not published yet")</span></div>
+                <div class="meta-card"><strong>Timestamp</strong><span>@(_publishResult?.TimestampUtc?.ToLocalTime().ToString("u") ?? "-")</span></div>
+                <div class="meta-card"><strong>Topic</strong><span>@(_publishResult?.Topic ?? _selectedTopic ?? "-")</span></div>
+                <div class="meta-card"><strong>Offset</strong><span>@(_publishResult?.Offset.ToString() ?? "-")</span></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string? ConnectionSessionId { get; set; }
+
+    private readonly List<KafkaTopicSummary> _topics = [];
+    private string? _selectedTopic;
+    private string _envelopeJson = string.Empty;
+    private MessagePreview? _preview;
+    private PublishResultInfo? _publishResult;
+    private string? _singleError;
+    private string? _loadedSessionId;
+
+    // Batch fields
+    private BatchPublishJobStatus _batchStatus = new();
+    private BatchTransportKind _sourceTransport = BatchTransportKind.FileSystem;
+    private string _sourceFsPath = string.Empty;
+    private string _sourceS3Bucket = string.Empty;
+    private string _sourceS3Region = string.Empty;
+    private string _sourceS3Prefix = string.Empty;
+    private string _sourceS3AccessKey = string.Empty;
+    private string _sourceS3SecretKey = string.Empty;
+    private string _batchTopicOverride = string.Empty;
+    private int _batchMaxMessages;
+    private double _batchMps;
+    private string? _batchError;
+
+    private bool CanStartBatch => !string.IsNullOrWhiteSpace(ConnectionSessionId) && !_batchStatus.IsRunning;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal))
+        {
+            _loadedSessionId = ConnectionSessionId;
+            await RefreshTopicsAsync().ConfigureAwait(false);
+            ResetTemplate();
+        }
+    }
+
+    private async Task RefreshTopicsAsync()
+    {
+        _topics.Clear();
+        _singleError = null;
+        if (string.IsNullOrWhiteSpace(ConnectionSessionId)) return;
+
+        try
+        {
+            var topics = await TopicBrowserService.ListTopicsAsync(ConnectionSessionId).ConfigureAwait(false);
+            _topics.AddRange(topics);
+            _selectedTopic = _topics.FirstOrDefault()?.Name;
+        }
+        catch (Exception ex) { _singleError = ex.Message; }
+    }
+
+    private BatchSourceOptions BuildSource() => _sourceTransport switch
+    {
+        BatchTransportKind.S3 => new BatchSourceOptions
+        {
+            TransportKind = BatchTransportKind.S3,
+            S3 = new S3LocationOptions
+            {
+                Bucket = _sourceS3Bucket,
+                Region = _sourceS3Region,
+                Prefix = _sourceS3Prefix,
+                AccessKey = _sourceS3AccessKey,
+                SecretKey = _sourceS3SecretKey
+            }
+        },
+        _ => new BatchSourceOptions
+        {
+            TransportKind = BatchTransportKind.FileSystem,
+            FileSystem = new FileSystemLocationOptions
+            {
+                Path = string.IsNullOrWhiteSpace(_sourceFsPath) ? null : _sourceFsPath.Trim()
+            }
+        }
+    };
+
+    private async Task StartBatchAsync()
+    {
+        if (!CanStartBatch || string.IsNullOrWhiteSpace(ConnectionSessionId)) return;
+        _batchError = null;
+        try
+        {
+            var request = new BatchPublishRequest
+            {
+                ConnectionSessionId = ConnectionSessionId,
+                Source = BuildSource(),
+                TopicOverride = string.IsNullOrWhiteSpace(_batchTopicOverride) ? null : _batchTopicOverride,
+                MaxMessages = _batchMaxMessages > 0 ? _batchMaxMessages : null,
+                MessagesPerSecond = _batchMps > 0 ? _batchMps : null
+            };
+            _batchStatus = await BatchPublishService.StartAsync(request).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _batchError = ex.Message; }
+    }
+
+    private async Task StopBatchAsync()
+    {
+        await BatchPublishService.StopAsync().ConfigureAwait(false);
+        _batchStatus = BatchPublishService.Snapshot;
+    }
+
+    private void ResetTemplate()
+    {
+        var payload = """{"orderId":42,"status":"queued","source":"Steak sample"}""";
+        var envelope = new SteakMessageEnvelope
+        {
+            App = "Steak",
+            ConnectionSessionId = ConnectionSessionId,
+            Topic = _selectedTopic,
+            KeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("order-42")),
+            ValueBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)),
+            Headers =
+            [
+                new SteakMessageHeader { Key = "content-type", ValueBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("application/json")) },
+                new SteakMessageHeader { Key = "x-demo", ValueBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("steak-sample")) }
+            ]
+        };
+        _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        _preview = null;
+        _publishResult = null;
+        _singleError = null;
+    }
+
+    private async Task PreviewAsync()
+    {
+        try
+        {
+            var envelope = ParseEnvelope();
+            _preview = MessagePreviewService.CreatePreview(envelope.KeyBase64, envelope.ValueBase64);
+            _publishResult = null;
+            _singleError = null;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _singleError = ex.Message; }
+    }
+
+    private Task FormatAsync()
+    {
+        try
+        {
+            var envelope = ParseEnvelope();
+            _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            _singleError = null;
+        }
+        catch (Exception ex) { _singleError = ex.Message; }
+        return Task.CompletedTask;
+    }
+
+    private async Task PublishAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(ConnectionSessionId))
+                throw new InvalidOperationException("Connect first before publishing.");
+
+            var envelope = ParseEnvelope();
+            _preview = MessagePreviewService.CreatePreview(envelope.KeyBase64, envelope.ValueBase64);
+            _publishResult = await MessagePublisher.PublishAsync(new PublishEnvelopeRequest
+            {
+                ConnectionSessionId = ConnectionSessionId,
+                Topic = _selectedTopic,
+                Envelope = envelope
+            }).ConfigureAwait(false);
+            _singleError = null;
+        }
+        catch (Exception ex) { _singleError = ex.Message; }
+    }
+
+    private SteakMessageEnvelope ParseEnvelope()
+    {
+        var envelope = System.Text.Json.JsonSerializer.Deserialize<SteakMessageEnvelope>(_envelopeJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        return envelope ?? throw new InvalidOperationException("The envelope editor is empty.");
+    }
+}
