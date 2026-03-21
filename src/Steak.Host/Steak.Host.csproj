@@ -18,9 +18,7 @@
     <Title>Steak</Title>
     <Product>Steak</Product>
     <Description>Self-hosted Kafka viewer, exporter, and publisher.</Description>
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <VersionPrefix>0.0.0</VersionPrefix>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 

@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["1.0.1"]
+    tags: ["1.0.2"]
 
 permissions:
   contents: write
