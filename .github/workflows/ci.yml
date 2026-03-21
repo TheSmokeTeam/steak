@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 env:
-  DOCKER_IMAGE: smoketeam/steak
+  DOCKER_REPOSITORY_NAME: steak
 
 jobs:
   build-and-test:
@@ -55,12 +55,14 @@ jobs:
         id: docker-tags
         shell: bash
         run: |
+          image="${{ secrets.DOCKER_USERNAME }}/${DOCKER_REPOSITORY_NAME}"
           {
+            echo "image=${image}"
             echo "value<<EOF"
-            echo "${DOCKER_IMAGE}:latest"
-            echo "${DOCKER_IMAGE}:${GITHUB_RUN_NUMBER}"
+            echo "${image}:latest"
+            echo "${image}:${GITHUB_RUN_NUMBER}"
             if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-              echo "${DOCKER_IMAGE}:${GITHUB_REF_NAME}"
+              echo "${image}:${GITHUB_REF_NAME}"
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"

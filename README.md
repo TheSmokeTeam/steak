@@ -74,7 +74,7 @@ Notes:
 Pull from Docker Hub:
 
 ```powershell
-docker pull smoketeam/steak:latest
+docker pull <docker-username>/steak:latest
 ```
 
 Run the container:
@@ -83,7 +83,7 @@ Run the container:
 docker run --rm `
   -p 8080:8080 `
   -v ${PWD}/data:/data `
-  smoketeam/steak:latest
+  <docker-username>/steak:latest
 ```
 
 Open:
@@ -355,7 +355,7 @@ This starts the published `Steak.exe`, runs the Kafka API smoke, runs the headle
 It:
 
 - restores, builds, and tests the solution
-- publishes Docker images to `smoketeam/steak`
+- publishes Docker images to `<DOCKER_USERNAME>/steak`
 - uses Docker Hub credentials from:
   - `DOCKER_USERNAME`
   - `DOCKER_PASSWORD`
