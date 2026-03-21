@@ -8,6 +8,16 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
+function Normalize-ProcessPathVariable {
+    $pathValue = [Environment]::GetEnvironmentVariable("Path", "Process")
+    if ([string]::IsNullOrWhiteSpace($pathValue)) {
+        $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
+    }
+
+    [Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+    [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+}
+
 function Stop-SteakProcess {
     param([System.Diagnostics.Process]$Process)
 
@@ -67,6 +77,8 @@ function Test-SteakLaunch {
     $url = "http://127.0.0.1:$Port"
 
     Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+    Normalize-ProcessPathVariable
 
     $process = Start-Process -FilePath $exePath `
         -ArgumentList "--urls", $url `

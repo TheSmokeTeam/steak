@@ -6,6 +6,8 @@ obj/
 TestResults/
 verification-data/
 artifacts/
+.dotnet/
+.nuget/
 
 # Node-based UI smoke tooling
 node_modules/

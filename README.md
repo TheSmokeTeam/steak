@@ -67,7 +67,8 @@ Notes:
 
 - The Windows build is self-contained. No .NET runtime installation is required.
 - Steak no longer auto-opens your browser. It starts in the background and waits for you to open the URL yourself.
-- Local app data defaults to `%LOCALAPPDATA%\\Steak`.
+- Steak stores mutable data in the first writable location it can use:
+  `%LOCALAPPDATA%\\Steak`, then `.steak` next to the executable, then `.steak` under the content root, then the system temp folder.
 
 ### 2. Docker mode
 

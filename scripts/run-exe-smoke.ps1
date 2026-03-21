@@ -10,6 +10,36 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
+function Normalize-ProcessPathVariable {
+    $pathValue = [Environment]::GetEnvironmentVariable("Path", "Process")
+    if ([string]::IsNullOrWhiteSpace($pathValue)) {
+        $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
+    }
+
+    [Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+    [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+}
+
+function Resolve-ExecutablePath {
+    param(
+        [string]$CommandName,
+        [string[]]$FallbackPaths = @()
+    )
+
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    foreach ($fallbackPath in $FallbackPaths) {
+        if (Test-Path $fallbackPath) {
+            return $fallbackPath
+        }
+    }
+
+    throw "Could not resolve executable path for '$CommandName'."
+}
+
 function Stop-SteakProcess {
     param([System.Diagnostics.Process]$Process)
 
@@ -54,7 +84,18 @@ if (-not (Test-Path $PublishedExePath)) {
 $workingDirectory = Split-Path $PublishedExePath -Parent
 $stdoutPath = Join-Path $workingDirectory "smoke.stdout.log"
 $stderrPath = Join-Path $workingDirectory "smoke.stderr.log"
+$powershellPath = Join-Path $PSHOME "powershell.exe"
+$nodePath = Resolve-ExecutablePath -CommandName "node" -FallbackPaths @(
+    "D:\node.exe",
+    "C:\Program Files\nodejs\node.exe"
+)
 Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+if (-not (Test-Path $powershellPath)) {
+    $powershellPath = (Get-Process -Id $PID).Path
+}
+
+Normalize-ProcessPathVariable
 
 $process = Start-Process -FilePath $PublishedExePath `
     -ArgumentList "--urls", $BaseUrl `
@@ -71,19 +112,25 @@ try {
         throw "Steak did not become ready at $BaseUrl.`nSTDOUT:`n$stdout`nSTDERR:`n$stderr"
     }
 
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "local-kafka-smoke.ps1") `
+    & $powershellPath -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "local-kafka-smoke.ps1") `
         -BaseUrl $BaseUrl `
         -BootstrapServers $BootstrapServers `
         -ExportDirectory $ApiExportDirectory `
         -ExpectedExportDirectory $ApiExportDirectory `
         -TimeoutSeconds $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) {
+        throw "local-kafka-smoke.ps1 failed with exit code $LASTEXITCODE."
+    }
 
     Push-Location $repoRoot
     try {
         $env:BASE_URL = $BaseUrl
         $env:UI_EXPORT_DIR = $UiExportDirectory
         $env:UI_SMOKE_TIMEOUT_MS = [string]($TimeoutSeconds * 1000)
-        npm run ui-smoke
+        & $nodePath (Join-Path $PSScriptRoot "ui-smoke.mjs")
+        if ($LASTEXITCODE -ne 0) {
+            throw "ui-smoke.mjs failed with exit code $LASTEXITCODE."
+        }
     }
     finally {
         Remove-Item Env:BASE_URL -ErrorAction SilentlyContinue

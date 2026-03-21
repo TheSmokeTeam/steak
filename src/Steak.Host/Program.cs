@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.DataProtection;
 using Steak.Core.Contracts;
 using Steak.Core.Services;
 using Steak.Host.Api;
@@ -24,6 +25,13 @@ public class Program
         ConfigureUrls(builder, runtimeOptions, isContainer);
 
         var defaultDataRoot = ResolveDataRoot(builder.Environment, builder.Configuration, isContainer);
+        var dataProtectionKeyRoot = Path.Combine(defaultDataRoot, "keys");
+
+        Directory.CreateDirectory(dataProtectionKeyRoot);
+
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole();
+        builder.Logging.AddDebug();
 
         builder.Services.Configure<SteakRuntimeOptions>(builder.Configuration.GetSection("Steak:Runtime"));
         builder.Services.PostConfigure<SteakRuntimeOptions>(options =>
@@ -39,6 +47,9 @@ public class Program
             }
         });
 
+        builder.Services.AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyRoot))
+            .SetApplicationName("Steak");
         builder.Services.AddProblemDetails();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
@@ -99,11 +110,47 @@ public class Program
             return "/data";
         }
 
+        var candidates = new List<string>();
+
         if (OperatingSystem.IsWindows())
         {
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Steak");
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                candidates.Add(Path.Combine(localAppData, "Steak"));
+            }
         }
 
-        return Path.Combine(environment.ContentRootPath, ".steak");
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, ".steak"));
+        candidates.Add(Path.Combine(environment.ContentRootPath, ".steak"));
+        candidates.Add(Path.Combine(Path.GetTempPath(), "Steak"));
+
+        foreach (var candidate in candidates)
+        {
+            if (TryEnsureWritableDirectory(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Steak could not find a writable data directory.");
+    }
+
+    private static bool TryEnsureWritableDirectory(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+
+            var probePath = Path.Combine(path, $".steak-write-test-{Guid.NewGuid():N}");
+            File.WriteAllText(probePath, string.Empty);
+            File.Delete(probePath);
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
