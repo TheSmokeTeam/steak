@@ -42,6 +42,17 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
+    public void Connect_DefaultsSecurityProtocolAndSaslMechanism()
+    {
+        var response = ConnectDefault();
+
+        var settings = _service.GetActiveSettings(response.ConnectionSessionId);
+
+        Assert.Equal("SaslPlaintext", settings.SecurityProtocol);
+        Assert.Equal("ScramSha512", settings.SaslMechanism);
+    }
+
+    [Fact]
     public void Connect_PreservesExplicitClientId()
     {
         _service.Connect(new ConnectRequest

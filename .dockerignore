@@ -9,3 +9,5 @@ node_modules/
 .dotnet/
 .nuget/
 samples/
+kafka_server_jaas.conf
+.github/agents/

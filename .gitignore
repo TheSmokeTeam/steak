@@ -25,3 +25,7 @@ samples/
 # OS noise
 Thumbs.db
 Desktop.ini
+
+# Local-only release and agent helpers
+kafka_server_jaas.conf
+.github/agents/

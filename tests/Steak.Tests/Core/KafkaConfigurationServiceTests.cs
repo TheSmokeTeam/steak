@@ -50,8 +50,8 @@ public sealed class KafkaConfigurationServiceTests
         var config = service.BuildConfig(settings, KafkaClientKind.Consumer);
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
-        Assert.DoesNotContain("security.protocol", config.Keys);
-        Assert.DoesNotContain("sasl.mechanism", config.Keys);
+        Assert.Equal("sasl_plaintext", config["security.protocol"]);
+        Assert.Equal("SCRAM-SHA-512", config["sasl.mechanism"]);
     }
 
     [Fact]

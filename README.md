@@ -25,6 +25,7 @@ Steak does not persist Kafka credentials or connection profiles. You can open mu
 - The client id defaults to your username when not explicitly set.
 - Refresh cluster metadata and list all visible topics from the connected broker.
 - Use friendly Kafka values such as `SaslPlaintext`, `SaslSsl`, `Plain`, `ScramSha256`, and `ScramSha512`.
+- New connections default to `SaslPlaintext` plus `ScramSha512`. Use `Plain` only when your broker is configured for SASL/PLAIN.
 
 ### View messages
 
@@ -58,7 +59,7 @@ Windows downloads include:
 
 The recommended download is `Steak-win-x64-portable.zip`. It contains the full published layout. `Steak.exe` is also available separately.
 
-Steps:
+Use the prebuilt release:
 
 1. Download the latest release assets.
 2. Extract `Steak-win-x64-portable.zip` to a folder of your choice.
@@ -71,6 +72,49 @@ Notes:
 - Steak auto-opens your default browser when it starts outside Docker.
 - Steak stores mutable data in the first writable location it can use:
   `%LOCALAPPDATA%\\Steak`, then `.steak` next to the executable, then `.steak` under the content root, then the system temp folder.
+
+Create the `.exe` yourself from source:
+
+```powershell
+dotnet restore
+dotnet publish .\src\Steak.Host\Steak.Host.csproj -c Release -p:PublishProfile=Steak-win-x64
+```
+
+Output:
+
+```text
+artifacts\publish\win-x64\Steak.exe
+artifacts\publish\win-x64\*
+```
+
+Package a portable zip from the published output:
+
+```powershell
+$releaseDir = Join-Path $PWD 'artifacts\release'
+$zipPath = Join-Path $releaseDir 'Steak-win-x64-portable.zip'
+New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Compress-Archive -Path .\artifacts\publish\win-x64\* -DestinationPath $zipPath
+```
+
+Smoke-test the published executable:
+
+```powershell
+.\scripts\verify-standalone.ps1
+```
+
+Using the published `.exe`:
+
+1. Keep `Steak.exe` in the published folder, or extract the portable zip without deleting any files next to it.
+2. Double-click `Steak.exe`, or launch it from PowerShell:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe
+```
+
+3. Wait for the browser to open on `http://127.0.0.1:4040`.
+4. Create a connection. The form defaults to `SaslPlaintext` and `ScramSha512`.
+5. If you are using the bundled `docker-compose.yml` Kafka stack, change `SASL Mechanism` to `Plain` before connecting because that sample broker is configured for SASL/PLAIN.
 
 ### 2. Docker mode
 
@@ -121,32 +165,33 @@ docker compose up -d
 
 This starts Kafka on `localhost:9092` with SASL/PLAIN authentication and creates these topics automatically:
 
-| Topic | Partitions |
-|-------|------------|
-| `orders` | 3 |
-| `payments` | 2 |
-| `users` | 2 |
-| `notifications` | 1 |
-| `audit-log` | 3 |
-| `inventory.updates` | 2 |
-| `shipping.events` | 2 |
-| `analytics.clickstream` | 4 |
-| `platform.health` | 1 |
-| `customer.feedback` | 2 |
+| Topic                   | Partitions |
+| ----------------------- | ---------- |
+| `orders`                | 3          |
+| `payments`              | 2          |
+| `users`                 | 2          |
+| `notifications`         | 1          |
+| `audit-log`             | 3          |
+| `inventory.updates`     | 2          |
+| `shipping.events`       | 2          |
+| `analytics.clickstream` | 4          |
+| `platform.health`       | 1          |
+| `customer.feedback`     | 2          |
 
 ### Connect from Steak
 
 Use these settings:
 
-| Field | Value |
-|-------|-------|
-| Bootstrap Servers | `localhost:9092` |
-| Username | `admin` |
-| Password | `admin` |
+| Field             | Value                           |
+| ----------------- | ------------------------------- |
+| Bootstrap Servers | `localhost:9092`                |
+| Username          | `admin`                         |
+| Password          | `admin`                         |
 | Security Protocol | `SaslPlaintext` (auto-detected) |
-| SASL Mechanism | `Plain` (auto-detected) |
+| SASL Mechanism    | `Plain`                         |
 
-Security protocol and SASL mechanism default to `SaslPlaintext` and `Plain` when left blank.
+Steak defaults new connections to `SaslPlaintext` and `ScramSha512`.
+For this bundled Docker Compose broker, explicitly switch the mechanism to `Plain`.
 
 ### Stop Kafka
 
@@ -161,9 +206,10 @@ docker compose down
 1. Click `+ New Connection`.
 2. Enter bootstrap servers (e.g. `localhost:9092`).
 3. Enter username and password (required for all connections).
-4. Security protocol defaults to `SaslPlaintext` and mechanism to `Plain` when left blank.
-5. Click `Connect`.
-6. Use `Refresh Topics` to reload cluster metadata.
+4. Security protocol defaults to `SaslPlaintext` and mechanism to `ScramSha512`.
+5. If you are connecting to the bundled `docker-compose.yml` broker, change the mechanism to `Plain`.
+6. Click `Connect`.
+7. Use `Refresh Topics` to reload cluster metadata.
 
 You can open multiple connections by clicking `+ New Connection` again. Each connection appears as a tab. Click the `×` on a tab to disconnect from that cluster.
 
@@ -242,6 +288,8 @@ Publish output:
 artifacts\publish\win-x64\
 ```
 
+This folder contains the runnable `Steak.exe`. To create the same portable zip that the release workflow attaches, compress the contents into `artifacts\release\Steak-win-x64-portable.zip`.
+
 ### Build the Docker image locally
 
 ```powershell
@@ -279,6 +327,12 @@ Key endpoints:
 | `/api/batch-publish`        | POST   | Start batch publish  |
 | `/api/batch-publish`        | GET    | Batch status         |
 | `/api/batch-publish`        | DELETE | Stop batch publish   |
+
+## Release Notes
+
+- Version `1.0.0` is the first stable release line.
+- Pushing the Git tag `1.0.0` triggers the Windows release workflow and publishes the GitHub release assets.
+- The same `1.0.0` tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
 
 ## Steak Envelope Format
 

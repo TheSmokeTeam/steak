@@ -22,8 +22,9 @@ public class Program
         var isContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         var runtimeOptions = builder.Configuration.GetSection("Steak:Runtime").Get<SteakRuntimeOptions>() ?? new SteakRuntimeOptions();
 
+        var explicitUrls = ParseUrls(args);
         var port = ParsePort(args);
-        ConfigureUrls(builder, runtimeOptions, isContainer, port);
+        ConfigureUrls(builder, runtimeOptions, isContainer, explicitUrls, port);
 
         var defaultDataRoot = ResolveDataRoot(builder.Environment, builder.Configuration, isContainer);
         var dataProtectionKeyRoot = Path.Combine(defaultDataRoot, "keys");
@@ -87,8 +88,14 @@ public class Program
         app.Run();
     }
 
-    private static void ConfigureUrls(WebApplicationBuilder builder, SteakRuntimeOptions runtimeOptions, bool isContainer, int? port)
+    private static void ConfigureUrls(WebApplicationBuilder builder, SteakRuntimeOptions runtimeOptions, bool isContainer, string? explicitUrls, int? port)
     {
+        if (!string.IsNullOrWhiteSpace(explicitUrls))
+        {
+            builder.WebHost.UseUrls(explicitUrls);
+            return;
+        }
+
         if (port.HasValue)
         {
             var host = isContainer ? "0.0.0.0" : "127.0.0.1";
@@ -96,13 +103,25 @@ public class Program
             return;
         }
 
-        var explicitUrls = builder.Configuration["urls"] ?? builder.Configuration["ASPNETCORE_URLS"];
-        if (!string.IsNullOrWhiteSpace(explicitUrls))
+        builder.WebHost.UseUrls(isContainer ? runtimeOptions.ContainerUrl : runtimeOptions.LocalUrl);
+    }
+
+    private static string? ParseUrls(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
         {
-            return;
+            if (args[i] == "--urls" && i + 1 < args.Length)
+            {
+                return args[i + 1];
+            }
+
+            if (args[i].StartsWith("--urls=", StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i]["--urls=".Length..];
+            }
         }
 
-        builder.WebHost.UseUrls(isContainer ? runtimeOptions.ContainerUrl : runtimeOptions.LocalUrl);
+        return null;
     }
 
     private static int? ParsePort(string[] args)

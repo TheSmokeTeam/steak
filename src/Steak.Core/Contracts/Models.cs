@@ -87,13 +87,13 @@ public sealed class KafkaConnectionSettings
     /// Optional Kafka security protocol. Friendly names such as <c>Plaintext</c>,
     /// <c>SaslPlaintext</c>, <c>SaslSsl</c>, and <c>Ssl</c> are accepted.
     /// </summary>
-    public string SecurityProtocol { get; set; } = string.Empty;
+    public string SecurityProtocol { get; set; } = "SaslPlaintext";
 
     /// <summary>
     /// Optional SASL mechanism. Friendly names such as <c>Plain</c>,
     /// <c>ScramSha256</c>, and <c>ScramSha512</c> are accepted.
     /// </summary>
-    public string SaslMechanism { get; set; } = string.Empty;
+    public string SaslMechanism { get; set; } = "ScramSha512";
 
     /// <summary>
     /// Optional client id applied to all connection types.

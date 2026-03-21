@@ -37,6 +37,16 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
             request.Settings.ClientId = request.Settings.Username.Trim();
         }
 
+        if (string.IsNullOrWhiteSpace(request.Settings.SecurityProtocol))
+        {
+            request.Settings.SecurityProtocol = "SaslPlaintext";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Settings.SaslMechanism))
+        {
+            request.Settings.SaslMechanism = "ScramSha512";
+        }
+
         var sessionId = Guid.NewGuid().ToString("N");
         lock (_sync)
         {
