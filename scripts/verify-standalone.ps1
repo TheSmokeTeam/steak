@@ -65,6 +65,20 @@ function Wait-ForHttpReady {
     return $false
 }
 
+function Assert-Http200 {
+    param(
+        [string]$Uri,
+        [string]$Description
+    )
+
+    $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 5
+    if ($response.StatusCode -ne 200) {
+        throw "Expected HTTP 200 for $Description at $Uri but got $($response.StatusCode)."
+    }
+
+    return $response
+}
+
 function Test-SteakLaunch {
     param(
         [string]$WorkingDirectory,
@@ -79,6 +93,7 @@ function Test-SteakLaunch {
     Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 
     Normalize-ProcessPathVariable
+    $env:Steak__Runtime__LaunchBrowser = "false"
 
     $process = Start-Process -FilePath $exePath `
         -ArgumentList "--urls", $url `
@@ -95,9 +110,19 @@ function Test-SteakLaunch {
             throw "Steak did not become ready at $url.`nSTDOUT:`n$stdout`nSTDERR:`n$stderr"
         }
 
-        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
-        if ($response.StatusCode -ne 200) {
-            throw "Expected HTTP 200 from $url but got $($response.StatusCode)."
+        $response = Assert-Http200 -Uri $url -Description "application root"
+        $staticAssetChecks = @(
+            @{ Path = "app.css"; Description = "application stylesheet" },
+            @{ Path = "Steak.styles.css"; Description = "scoped component stylesheet" },
+            @{ Path = "_framework/blazor.web.js"; Description = "Blazor bootstrap script" }
+        ) | ForEach-Object {
+            $assetUrl = "$url/$($_.Path)"
+            $assetResponse = Assert-Http200 -Uri $assetUrl -Description $_.Description
+
+            [pscustomobject]@{
+                Path = $_.Path
+                StatusCode = $assetResponse.StatusCode
+            }
         }
 
         Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
@@ -105,6 +130,7 @@ function Test-SteakLaunch {
         return [pscustomobject]@{
             Url = $url
             StatusCode = $response.StatusCode
+            StaticAssets = $staticAssetChecks
             WorkingDirectory = $WorkingDirectory
         }
     }

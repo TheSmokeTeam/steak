@@ -18,7 +18,14 @@ public class Program
     /// </summary>
     public static void Main(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        var resolvedWebRootPath = TryResolveWebRootPath();
+        var builderOptions = new WebApplicationOptions
+        {
+            Args = args,
+            WebRootPath = resolvedWebRootPath
+        };
+
+        var builder = WebApplication.CreateBuilder(builderOptions);
         var isContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         var runtimeOptions = builder.Configuration.GetSection("Steak:Runtime").Get<SteakRuntimeOptions>() ?? new SteakRuntimeOptions();
 
@@ -177,6 +184,47 @@ public class Program
         }
 
         throw new InvalidOperationException("Steak could not find a writable data directory.");
+    }
+
+    private static string? TryResolveWebRootPath()
+    {
+        var depsRoot = TryResolveDepsRoot();
+        if (!string.IsNullOrWhiteSpace(depsRoot))
+        {
+            if (File.Exists(Path.Combine(depsRoot, "app.css")))
+            {
+                return depsRoot;
+            }
+
+            var depsWwwroot = Path.Combine(depsRoot, "wwwroot");
+            if (Directory.Exists(depsWwwroot))
+            {
+                return depsWwwroot;
+            }
+        }
+
+        var appBaseWwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        if (Directory.Exists(appBaseWwwroot))
+        {
+            return appBaseWwwroot;
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveDepsRoot()
+    {
+        var depsFilesValue = AppDomain.CurrentDomain.GetData("APP_CONTEXT_DEPS_FILES") as string;
+        if (string.IsNullOrWhiteSpace(depsFilesValue))
+        {
+            return null;
+        }
+
+        var firstDepsFile = depsFilesValue
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(firstDepsFile) ? null : Path.GetDirectoryName(firstDepsFile);
     }
 
     private static bool TryEnsureWritableDirectory(string path)

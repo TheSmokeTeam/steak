@@ -22,4 +22,29 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <Target Name="IncludeStaticWebAssetsInSingleFileBundle"
+          BeforeTargets="GenerateSingleFileBundle"
+          DependsOnTargets="PrepareForBundle;GenerateStaticWebAssetsPublishManifest">
+    <ReadStaticWebAssetsManifestFile ManifestPath="$(StaticWebAssetPublishManifestPath)">
+      <Output TaskParameter="Endpoints" ItemName="_PublishManifestStaticWebAssetEndpoint" />
+    </ReadStaticWebAssetsManifestFile>
+
+    <ItemGroup>
+      <_StandaloneStaticWebAsset Include="@(_PublishManifestStaticWebAssetEndpoint)"
+                                 Condition="'%(_PublishManifestStaticWebAssetEndpoint.Selectors)' == '[]' and (
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == 'app.css' or
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == 'Steak.styles.css' or
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == 'favicon.png' or
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == 'steak-logo.png' or
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == '_framework/blazor.server.js' or
+                                   '%(_PublishManifestStaticWebAssetEndpoint.Identity)' == '_framework/blazor.web.js')">
+        <SourcePath>%(_PublishManifestStaticWebAssetEndpoint.AssetFile)</SourcePath>
+      </_StandaloneStaticWebAsset>
+
+      <FilesToBundle Include="@(_StandaloneStaticWebAsset->'%(SourcePath)')">
+        <RelativePath>%(_StandaloneStaticWebAsset.Identity)</RelativePath>
+      </FilesToBundle>
+    </ItemGroup>
+  </Target>
+
 </Project>
