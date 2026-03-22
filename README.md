@@ -331,8 +331,9 @@ Key endpoints:
 ## Release Notes
 
 - Project files keep `VersionPrefix` at `0.0.0`, and release identity is driven by the Git tag.
-- Pushing the Git tag `1.0.2` triggers the Windows release workflow and publishes the GitHub release assets.
-- The same `1.0.2` tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
+- Pushing a stable Git tag such as `1.0.3` triggers the Windows release workflow and publishes the GitHub release assets.
+- The same stable tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
+- Tags that include a prerelease suffix such as `-alpha.1` publish a GitHub prerelease, but skip Docker `latest`.
 
 ## Steak Envelope Format
 
