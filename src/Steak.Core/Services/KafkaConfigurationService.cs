@@ -1,8 +1,9 @@
+using Microsoft.Extensions.Logging;
 using Steak.Core.Contracts;
 
 namespace Steak.Core.Services;
 
-internal sealed class KafkaConfigurationService : IKafkaConfigurationService
+internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationService>? logger = null) : IKafkaConfigurationService
 {
     private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -19,6 +20,14 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
         IReadOnlyDictionary<string, string>? overrides = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
+
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Building Kafka {ClientKind} config from settings: {ConnectionSettings}",
+                clientKind,
+                KafkaDiagnostics.FormatSettings(settings));
+        }
 
         if (string.IsNullOrWhiteSpace(settings.BootstrapServers))
         {
@@ -59,6 +68,14 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
             {
                 config[pair.Key] = pair.Value;
             }
+        }
+
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Built Kafka {ClientKind} config: {KafkaConfig}",
+                clientKind,
+                KafkaDiagnostics.FormatConfig(config));
         }
 
         return config;

@@ -267,7 +267,10 @@ public static class SteakApiEndpoints
             _ => StatusCodes.Status500InternalServerError
         };
 
-        return TypedResults.Problem(title: "Steak API error", detail: exception.Message, statusCode: statusCode);
+        return TypedResults.Problem(
+            title: $"Steak API error ({exception.GetType().Name})",
+            detail: SteakErrorDetails.Format(exception),
+            statusCode: statusCode);
     }
 
     private static IResult ToProblemResult(Exception exception)
@@ -280,7 +283,10 @@ public static class SteakApiEndpoints
             _ => StatusCodes.Status500InternalServerError
         };
 
-        return Results.Problem(title: "Steak API error", detail: exception.Message, statusCode: statusCode);
+        return Results.Problem(
+            title: $"Steak API error ({exception.GetType().Name})",
+            detail: SteakErrorDetails.Format(exception),
+            statusCode: statusCode);
     }
 
     /// <summary>

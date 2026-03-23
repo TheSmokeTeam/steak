@@ -1,12 +1,13 @@
+using Microsoft.Extensions.Logging;
 using Steak.Core.Contracts;
 
 namespace Steak.Core.Services;
 
 /// <summary>
-/// Holds multiple active Kafka connection sessions in memory. No persistence — sessions
+/// Holds multiple active Kafka connection sessions in memory. No persistence ג€” sessions
 /// live only as long as the app process.
 /// </summary>
-internal sealed class ConnectionSessionService : IConnectionSessionService
+internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>? logger = null) : IConnectionSessionService
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, (KafkaConnectionSettings Settings, DateTimeOffset ConnectedAtUtc)> _sessions = new(StringComparer.Ordinal);
@@ -15,6 +16,13 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Settings);
+
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Received Kafka connection request with raw settings: {ConnectionSettings}",
+                KafkaDiagnostics.FormatSettings(request.Settings));
+        }
 
         request.Settings.BootstrapServers = NormalizeBootstrapServers(request.Settings.BootstrapServers);
 
@@ -49,11 +57,28 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
             request.Settings.SaslMechanism = "ScramSha512";
         }
 
+        logger?.LogInformation(
+            "Creating Kafka connection session for {BootstrapServers} as user {Username}",
+            request.Settings.BootstrapServers,
+            request.Settings.Username);
+
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Normalized Kafka connection settings ready for session creation: {ConnectionSettings}",
+                KafkaDiagnostics.FormatSettings(request.Settings));
+        }
+
         var sessionId = Guid.NewGuid().ToString("N");
         lock (_sync)
         {
             _sessions[sessionId] = (request.Settings, DateTimeOffset.UtcNow);
         }
+
+        logger?.LogInformation(
+            "Kafka connection session {SessionId} created for {BootstrapServers}",
+            sessionId,
+            request.Settings.BootstrapServers);
 
         return new ConnectResponse
         {
@@ -64,17 +89,31 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
 
     public void Disconnect()
     {
+        var disconnected = 0;
         lock (_sync)
         {
+            disconnected = _sessions.Count;
             _sessions.Clear();
         }
+
+        logger?.LogInformation("Disconnected {SessionCount} Kafka session(s)", disconnected);
     }
 
     public void Disconnect(string connectionSessionId)
     {
+        var removed = false;
         lock (_sync)
         {
-            _sessions.Remove(connectionSessionId);
+            removed = _sessions.Remove(connectionSessionId);
+        }
+
+        if (removed)
+        {
+            logger?.LogInformation("Disconnected Kafka session {SessionId}", connectionSessionId);
+        }
+        else
+        {
+            logger?.LogDebug("Kafka disconnect requested for unknown session {SessionId}", connectionSessionId);
         }
     }
 
@@ -122,9 +161,18 @@ internal sealed class ConnectionSessionService : IConnectionSessionService
         {
             if (_sessions.TryGetValue(connectionSessionId, out var entry))
             {
+                if (logger?.IsEnabled(LogLevel.Debug) == true)
+                {
+                    logger.LogDebug(
+                        "Resolved active Kafka session {SessionId} with settings {ConnectionSettings}",
+                        connectionSessionId,
+                        KafkaDiagnostics.FormatSettings(entry.Settings));
+                }
+
                 return entry.Settings;
             }
 
+            logger?.LogWarning("No active Kafka session found for id {SessionId}", connectionSessionId);
             throw new InvalidOperationException("No active connection session matches the supplied id. Connect first.");
         }
     }

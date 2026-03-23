@@ -1,4 +1,5 @@
 @page "/"
+@inject ILogger<Home> Logger
 @inject ITopicBrowserService TopicBrowserService
 
 <PageTitle>Steak</PageTitle>
@@ -244,6 +245,11 @@ Example: request.timeout.ms=10000</span></span></span>
                 _settings.SaslMechanism = "ScramSha512";
             }
 
+            Logger.LogInformation(
+                "Kafka connection attempt requested from UI for {BootstrapServers} as user {Username}",
+                _settings.BootstrapServers,
+                _settings.Username);
+
             // If editing, disconnect the old session first
             if (!string.IsNullOrWhiteSpace(_editingSessionId))
             {
@@ -258,13 +264,23 @@ Example: request.timeout.ms=10000</span></span></span>
             {
                 await TopicBrowserService.ListTopicsAsync(response.ConnectionSessionId).ConfigureAwait(false);
             }
-            catch
+            catch (Exception exception)
             {
-                // Connection failed — remove the session and surface the error.
                 SessionService.Disconnect(response.ConnectionSessionId);
+                Logger.LogError(
+                    exception,
+                    "Kafka connection validation failed for UI session {SessionId}",
+                    response.ConnectionSessionId);
                 throw new InvalidOperationException(
-                    "Unable to connect to the Kafka cluster. Please verify your bootstrap servers, credentials, security protocol, and network connectivity.");
+                    UiErrorMessage.Build(
+                        "Unable to connect to the Kafka cluster. Verify the bootstrap servers, credentials, security protocol, and network path.",
+                        exception),
+                    exception);
             }
+
+            Logger.LogInformation(
+                "Kafka connection validated successfully for UI session {SessionId}",
+                response.ConnectionSessionId);
 
             _sessions = SessionService.GetAllSessions().ToList();
             _activeSession = _sessions.FirstOrDefault(s => s.ConnectionSessionId == response.ConnectionSessionId);
@@ -274,6 +290,7 @@ Example: request.timeout.ms=10000</span></span></span>
         }
         catch (Exception exception)
         {
+            Logger.LogError(exception, "Kafka connection attempt failed from the UI");
             _error = exception.Message;
         }
         finally
@@ -301,7 +318,8 @@ Example: request.timeout.ms=10000</span></span></span>
         }
         catch (Exception exception)
         {
-            _error = exception.Message;
+            Logger.LogError(exception, "Disconnect session request failed for session {SessionId}", sessionId);
+            _error = UiErrorMessage.Build("Disconnect session", exception);
         }
 
         return Task.CompletedTask;
@@ -330,7 +348,7 @@ Example: request.timeout.ms=10000</span></span></span>
         _editingSessionId = sessionId;
         _settings = new KafkaConnectionSettings
         {
-            BootstrapServers = session.BootstrapServers,
+            BootstrapServers = session.BootstrapServers ?? string.Empty,
             SecurityProtocol = "SaslPlaintext",
             SaslMechanism = "ScramSha512"
         };
@@ -349,7 +367,7 @@ Example: request.timeout.ms=10000</span></span></span>
         {
             _showConnectForm = true;
             _activeSession = null;
-            _error = "Connection session was lost. Please reconnect.";
+            _error = "Connection session was lost. The server no longer has the selected Kafka session. Please reconnect.";
         }
     }
 }

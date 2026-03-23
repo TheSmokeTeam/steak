@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -41,6 +40,7 @@ internal sealed class BatchPublishBackgroundService(
         }
         catch (OperationCanceledException)
         {
+            logger.LogDebug("Batch publish background service host lifetime cancelled");
         }
     }
 
@@ -57,8 +57,25 @@ internal sealed class BatchPublishBackgroundService(
                 throw new InvalidOperationException("Only one batch publish job can run at a time.");
         }
 
+        logger.LogDebug(
+            "Starting Kafka batch publish job. SessionId {SessionId}, source {Source}, topic override {TopicOverride}, max messages {MaxMessages}, messages/sec {MessagesPerSecond}, loop {Loop}",
+            request.ConnectionSessionId,
+            KafkaDiagnostics.FormatSource(request.Source),
+            request.TopicOverride,
+            request.MaxMessages,
+            request.MessagesPerSecond,
+            request.Loop);
+
         var settings = sessionService.GetActiveSettings(request.ConnectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Producer);
+
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                "Kafka batch publish config for session {SessionId}: {KafkaConfig}",
+                request.ConnectionSessionId,
+                KafkaDiagnostics.FormatConfig(config));
+        }
 
         var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(_hostStoppingToken);
         lock (_sync)
@@ -89,6 +106,11 @@ internal sealed class BatchPublishBackgroundService(
             _jobCancellation = null;
         }
 
+        if (jobTask is not null)
+        {
+            logger.LogDebug("Stopping active Kafka batch publish job");
+        }
+
         jobCancellation?.Cancel();
         if (jobTask is not null)
         {
@@ -98,6 +120,7 @@ internal sealed class BatchPublishBackgroundService(
             }
             catch (OperationCanceledException)
             {
+                logger.LogDebug("Kafka batch publish job stop observed operation cancellation");
             }
         }
 
@@ -119,6 +142,11 @@ internal sealed class BatchPublishBackgroundService(
         var reader = readers.FirstOrDefault(r => r.TransportKind == request.Source.TransportKind)
             ?? throw new InvalidOperationException($"No envelope reader registered for transport {request.Source.TransportKind}.");
 
+        logger.LogDebug(
+            "Kafka batch publish job selected reader {ReaderType} for source {Source}",
+            reader.GetType().Name,
+            KafkaDiagnostics.FormatSource(request.Source));
+
         var interval = request.MessagesPerSecond is > 0
             ? TimeSpan.FromSeconds(1.0 / request.MessagesPerSecond.Value)
             : TimeSpan.Zero;
@@ -128,15 +156,26 @@ internal sealed class BatchPublishBackgroundService(
 
         try
         {
-            using var producer = new ProducerBuilder<byte[]?, byte[]>(config).Build();
+            using var producer = new ProducerBuilder<byte[]?, byte[]>(config)
+                .SetErrorHandler((_, error) =>
+                {
+                    if (error.IsFatal)
+                    {
+                        logger.LogCritical("Fatal Kafka producer error in batch publish job: {Reason}", error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Kafka producer warning in batch publish job: {Reason}", error.Reason);
+                    }
 
-            logger.LogInformation(
-                "Started batch publish job from {TransportKind} using session {SessionId}",
-                request.Source.TransportKind,
-                request.ConnectionSessionId);
+                    UpdateError($"Kafka producer error: {error.Reason}");
+                })
+                .Build();
 
             do
             {
+                logger.LogDebug("Kafka batch publish loop iteration started");
+
                 await foreach (var envelope in reader.ReadEnvelopesAsync(request.Source, cancellationToken).ConfigureAwait(false))
                 {
                     if (cancellationToken.IsCancellationRequested || publishedCount >= maxMessages)
@@ -161,8 +200,23 @@ internal sealed class BatchPublishBackgroundService(
                         }
                     }
 
-                    await producer.ProduceAsync(topic, message, cancellationToken).ConfigureAwait(false);
+                    logger.LogDebug(
+                        "Kafka batch publish job discovered envelope {EnvelopeSummary}. Publishing to topic {Topic}. Discovered {DiscoveredCount}, published {PublishedCount}",
+                        KafkaDiagnostics.FormatEnvelopeSummary(normalized),
+                        topic,
+                        discoveredCount,
+                        publishedCount);
+
+                    var delivery = await producer.ProduceAsync(topic, message, cancellationToken).ConfigureAwait(false);
                     publishedCount++;
+
+                    logger.LogDebug(
+                        "Kafka batch publish delivered to topic {Topic}, partition {Partition}, offset {Offset}, status {Status}",
+                        delivery.Topic,
+                        delivery.Partition.Value,
+                        delivery.Offset.Value,
+                        delivery.Status);
+
                     UpdateSuccess(startedAt, discoveredCount, publishedCount);
 
                     if (interval > TimeSpan.Zero)
@@ -176,15 +230,17 @@ internal sealed class BatchPublishBackgroundService(
             }
             while (request.Loop && !cancellationToken.IsCancellationRequested);
 
+            logger.LogDebug("Flushing Kafka batch publish producer");
             producer.Flush(TimeSpan.FromSeconds(10));
         }
         catch (OperationCanceledException)
         {
+            logger.LogDebug("Kafka batch publish job cancelled");
         }
         catch (Exception exception)
         {
             logger.LogError(exception, "Batch publish job failed");
-            UpdateError(exception.Message);
+            UpdateError(SteakErrorDetails.Format(exception));
         }
         finally
         {
@@ -203,6 +259,11 @@ internal sealed class BatchPublishBackgroundService(
             _snapshot.CurrentMessagesPerSecond = Math.Round(publishedCount / elapsedSeconds, 2);
         }
 
+        logger.LogDebug(
+            "Kafka batch publish progress updated. Published {PublishedCount} of {DiscoveredCount} discovered envelope(s)",
+            publishedCount,
+            discoveredCount);
+
         NotifyStateChanged();
     }
 
@@ -213,16 +274,19 @@ internal sealed class BatchPublishBackgroundService(
             _snapshot.LastError = error;
         }
 
+        logger.LogError("Kafka batch publish state updated with error: {Error}", error);
         NotifyStateChanged();
     }
 
     private void CompleteJob()
     {
         CancellationTokenSource? cancellationToDispose = null;
+        BatchPublishJobStatus snapshot;
 
         lock (_sync)
         {
             _snapshot.IsRunning = false;
+            snapshot = Clone(_snapshot);
 
             if (_jobTask?.IsCompleted ?? false)
             {
@@ -231,6 +295,12 @@ internal sealed class BatchPublishBackgroundService(
                 _jobCancellation = null;
             }
         }
+
+        logger.LogDebug(
+            "Kafka batch publish job completed. Published {PublishedCount} message(s), discovered {DiscoveredCount}, last error: {LastError}",
+            snapshot.PublishedCount,
+            snapshot.TotalEnvelopes,
+            snapshot.LastError);
 
         cancellationToDispose?.Dispose();
         NotifyStateChanged();

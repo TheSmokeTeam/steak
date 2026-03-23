@@ -22,9 +22,11 @@ services:
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN,SCRAM-SHA-512
       KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
       KAFKA_LISTENER_NAME_SASL__PLAINTEXT_PLAIN_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin" user_admin="admin";'
-      # To enable SCRAM-SHA-512, you must also configure JAAS for SCRAM users if needed.
-      # KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
-      # - ./kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+      # The bundled local broker authenticates client connections with SASL/PLAIN.
+      # SCRAM remains enabled at the broker level so Steak can validate failure paths for unsupported client credentials.
+    volumes:
+      - ./kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
     healthcheck:
       test:
         [

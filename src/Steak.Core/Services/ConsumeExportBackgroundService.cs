@@ -47,6 +47,7 @@ internal sealed class ConsumeExportBackgroundService(
         }
         catch (OperationCanceledException)
         {
+            logger.LogDebug("Consume export background service host lifetime cancelled");
         }
     }
 
@@ -77,6 +78,17 @@ internal sealed class ConsumeExportBackgroundService(
             }
         }
 
+        logger.LogDebug(
+            "Starting Kafka consume export job. SessionId {SessionId}, topic {Topic}, group {GroupId}, partition {Partition}, offset mode {OffsetMode}, destination {Destination}, max messages {MaxMessages}, messages/sec {MessagesPerSecond}",
+            request.ConnectionSessionId,
+            request.Topic,
+            request.GroupId,
+            request.Partition,
+            request.OffsetMode,
+            KafkaDiagnostics.FormatDestination(request.Destination),
+            request.MaxMessages,
+            request.MessagesPerSecond);
+
         var settings = sessionService.GetActiveSettings(request.ConnectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Consumer);
 
@@ -85,6 +97,14 @@ internal sealed class ConsumeExportBackgroundService(
         config["enable.auto.commit"] = "true";
         config["enable.auto.offset.store"] = "false";
         config["auto.commit.interval.ms"] = "1000";
+
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                "Kafka consume export config for session {SessionId}: {KafkaConfig}",
+                request.ConnectionSessionId,
+                KafkaDiagnostics.FormatConfig(config));
+        }
 
         var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(_hostStoppingToken);
         lock (_sync)
@@ -120,6 +140,11 @@ internal sealed class ConsumeExportBackgroundService(
             _jobCancellation = null;
         }
 
+        if (jobTask is not null)
+        {
+            logger.LogDebug("Stopping active Kafka consume export job");
+        }
+
         jobCancellation?.Cancel();
         if (jobTask is not null)
         {
@@ -129,6 +154,7 @@ internal sealed class ConsumeExportBackgroundService(
             }
             catch (OperationCanceledException)
             {
+                logger.LogDebug("Kafka consume export job stop observed operation cancellation");
             }
         }
 
@@ -150,6 +176,11 @@ internal sealed class ConsumeExportBackgroundService(
         var writer = writers.FirstOrDefault(w => w.TransportKind == request.Destination.TransportKind)
             ?? throw new InvalidOperationException($"No envelope writer registered for transport {request.Destination.TransportKind}.");
 
+        logger.LogDebug(
+            "Kafka consume export job selected writer {WriterType} for destination {Destination}",
+            writer.GetType().Name,
+            KafkaDiagnostics.FormatDestination(request.Destination));
+
         // Build a simple rate limiter when a target throughput is specified.
         var interval = request.MessagesPerSecond is > 0
             ? TimeSpan.FromSeconds(1.0 / request.MessagesPerSecond.Value)
@@ -162,34 +193,85 @@ internal sealed class ConsumeExportBackgroundService(
             using var consumer = new ConsumerBuilder<byte[], byte[]>(config)
                 .SetKeyDeserializer(Deserializers.ByteArray)
                 .SetValueDeserializer(Deserializers.ByteArray)
+                .SetErrorHandler((_, error) =>
+                {
+                    if (error.IsFatal)
+                    {
+                        logger.LogCritical(
+                            "Fatal Kafka consumer error in export job for topic {Topic}: {Reason}",
+                            request.Topic,
+                            error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Kafka consumer warning in export job for topic {Topic}: {Reason}",
+                            request.Topic,
+                            error.Reason);
+                    }
+
+                    UpdateError($"Kafka consumer error: {error.Reason}");
+                })
+                .SetPartitionsAssignedHandler((_, partitions) =>
+                {
+                    logger.LogDebug(
+                        "Kafka export job assigned partitions for topic {Topic}: {Partitions}",
+                        request.Topic,
+                        string.Join(", ", partitions.Select(partition => partition.ToString())));
+                })
+                .SetPartitionsRevokedHandler((_, partitions) =>
+                {
+                    logger.LogDebug(
+                        "Kafka export job revoked partitions for topic {Topic}: {Partitions}",
+                        request.Topic,
+                        string.Join(", ", partitions.Select(partition => partition.ToString())));
+                })
                 .Build();
 
             if (request.Partition.HasValue)
             {
-                consumer.Assign(new TopicPartitionOffset(request.Topic, request.Partition.Value, request.OffsetMode.ToOffset()));
+                var assignment = new TopicPartitionOffset(request.Topic, request.Partition.Value, request.OffsetMode.ToOffset());
+                logger.LogDebug("Assigning Kafka export job to {Assignment}", assignment);
+                consumer.Assign(assignment);
             }
             else
             {
+                logger.LogDebug("Subscribing Kafka export job to topic {Topic}", request.Topic);
                 consumer.Subscribe(request.Topic);
             }
-
-            logger.LogInformation(
-                "Started Kafka export job for topic {Topic} using session {SessionId}",
-                request.Topic,
-                request.ConnectionSessionId);
 
             while (!cancellationToken.IsCancellationRequested && exportedCount < maxMessages)
             {
                 var result = consumer.Consume(cancellationToken);
                 if (result?.Message is null)
                 {
+                    logger.LogDebug("Kafka export consume cycle returned no message for topic {Topic}", request.Topic);
                     continue;
                 }
+
+                logger.LogDebug(
+                    "Kafka export job consumed message. Topic {Topic}, partition {Partition}, offset {Offset}, key bytes {KeyBytes}, value bytes {ValueBytes}, headers {HeaderCount}",
+                    result.Topic,
+                    result.Partition.Value,
+                    result.Offset.Value,
+                    result.Message.Key?.Length ?? 0,
+                    result.Message.Value?.Length ?? 0,
+                    result.Message.Headers?.Count ?? 0);
 
                 var envelope = envelopeFactory.Create(request.ConnectionSessionId, result);
                 var fileName = fileNameFactory.CreateMessageFileName(envelope);
 
+                logger.LogDebug(
+                    "Kafka export job prepared envelope {EnvelopeSummary} with file name {FileName}",
+                    KafkaDiagnostics.FormatEnvelopeSummary(envelope),
+                    fileName);
+
                 var destination = await writer.WriteEnvelopeAsync(envelope, fileName, request.Destination, cancellationToken).ConfigureAwait(false);
+
+                logger.LogDebug(
+                    "Kafka export job wrote envelope to {Destination} and is storing offset {Offset}",
+                    destination,
+                    result.Offset.Value);
 
                 consumer.StoreOffset(result);
                 exportedCount++;
@@ -203,6 +285,7 @@ internal sealed class ConsumeExportBackgroundService(
 
             try
             {
+                logger.LogDebug("Kafka export job committing final offsets");
                 consumer.Commit();
             }
             catch (KafkaException exception)
@@ -210,15 +293,17 @@ internal sealed class ConsumeExportBackgroundService(
                 logger.LogWarning(exception, "Final Kafka offset commit failed when stopping export job.");
             }
 
+            logger.LogDebug("Closing Kafka export consumer for topic {Topic}", request.Topic);
             consumer.Close();
         }
         catch (OperationCanceledException)
         {
+            logger.LogDebug("Kafka export job cancelled for topic {Topic}", request.Topic);
         }
         catch (Exception exception)
         {
             logger.LogError(exception, "Kafka export job failed for topic {Topic}", request.Topic);
-            UpdateError(exception.Message);
+            UpdateError(SteakErrorDetails.Format(exception));
         }
         finally
         {
@@ -237,6 +322,11 @@ internal sealed class ConsumeExportBackgroundService(
             _snapshot.CurrentMessagesPerSecond = Math.Round(count / elapsedSeconds, 2);
         }
 
+        logger.LogDebug(
+            "Kafka export job progress updated. Exported {Count} message(s). Last destination {Destination}",
+            count,
+            destination);
+
         NotifyStateChanged();
     }
 
@@ -247,16 +337,19 @@ internal sealed class ConsumeExportBackgroundService(
             _snapshot.LastError = error;
         }
 
+        logger.LogError("Kafka export job state updated with error: {Error}", error);
         NotifyStateChanged();
     }
 
     private void CompleteJob()
     {
         CancellationTokenSource? cancellationToDispose = null;
+        ConsumeJobStatus snapshot;
 
         lock (_sync)
         {
             _snapshot.IsRunning = false;
+            snapshot = Clone(_snapshot);
 
             if (_jobTask?.IsCompleted ?? false)
             {
@@ -265,6 +358,12 @@ internal sealed class ConsumeExportBackgroundService(
                 _jobCancellation = null;
             }
         }
+
+        logger.LogDebug(
+            "Kafka export job completed for topic {Topic}. Exported {ExportedCount} message(s). Last error: {LastError}",
+            snapshot.Topic,
+            snapshot.ExportedCount,
+            snapshot.LastError);
 
         cancellationToDispose?.Dispose();
         NotifyStateChanged();

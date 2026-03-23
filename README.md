@@ -116,6 +116,18 @@ Using the published `.exe`:
 4. Create a connection. The form defaults to `SaslPlaintext` and `ScramSha512`.
 5. If you are using the bundled `docker-compose.yml` Kafka stack, change `SASL Mechanism` to `Plain` before connecting because that sample broker is configured for SASL/PLAIN.
 
+Useful runtime flags:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --port 5050 --log-level Debug --open-browser false
+```
+
+- `--port 5050` binds Steak to `http://127.0.0.1:5050`.
+- `--log-level Debug` raises console logging to verbose Kafka diagnostics.
+- `--open-browser false` keeps Steak headless for smoke tests, automation, or multi-instance validation.
+- Supported log levels: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Fatal`.
+- `Debug` logs intentionally dump the full Kafka connection settings and effective Kafka client config, including raw credentials and PEM values. Use it only in a trusted local terminal session.
+
 ### 2. Docker mode
 
 Pull from Docker Hub:
@@ -152,6 +164,20 @@ dotnet run --project .\src\Steak.Host\Steak.Host.csproj
 ```
 
 Steak opens your default browser automatically at `http://127.0.0.1:4040`.
+
+You can override the console log level the same way in source mode:
+
+```powershell
+dotnet run --project .\src\Steak.Host\Steak.Host.csproj -- --port 5050 --log-level Debug --open-browser false
+```
+
+For headless runs or smoke tests, prefer the CLI flag:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --log-level Debug --open-browser false
+```
+
+`Steak:Runtime:LaunchBrowser=false` still works through configuration or environment variables when you need a persistent default, but the CLI flag is useful for one-off test runs.
 
 ## Local Kafka Quick Start
 

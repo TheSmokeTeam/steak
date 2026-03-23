@@ -1,4 +1,5 @@
 @implements IDisposable
+@inject ILogger<ViewWorkspace> Logger
 @inject ITopicBrowserService TopicBrowserService
 @inject IViewSessionService ViewSessionService
 
@@ -354,7 +355,8 @@ Does not affect what is consumed from Kafka.</span></span></span>
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            Logger.LogError(ex, "View workspace failed to refresh topics for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Refresh topics", ex);
             if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
                 await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
         }
@@ -383,13 +385,25 @@ Does not affect what is consumed from Kafka.</span></span></span>
             _sessionStatus = await ViewSessionService.StartAsync(request).ConfigureAwait(false);
             _selectedMessage = _sessionStatus.RecentMessages.LastOrDefault();
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "View workspace failed to start live view for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Start live view", ex);
+        }
     }
 
     private async Task StopAsync()
     {
-        await ViewSessionService.StopAsync().ConfigureAwait(false);
-        _sessionStatus = ViewSessionService.Snapshot;
+        try
+        {
+            await ViewSessionService.StopAsync().ConfigureAwait(false);
+            _sessionStatus = ViewSessionService.Snapshot;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "View workspace failed to stop live view for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Stop live view", ex);
+        }
     }
 
     private void SelectTopic(string topic)

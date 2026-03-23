@@ -30,11 +30,13 @@ internal sealed class BrowserLaunchHostedService(
     {
         if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true)
         {
+            logger.LogDebug("Skipping browser launch because Steak is running in a container");
             return;
         }
 
         if (!runtimeOptions.Value.LaunchBrowser)
         {
+            logger.LogDebug("Skipping browser launch because Steak:Runtime:LaunchBrowser is disabled");
             return;
         }
 
@@ -44,6 +46,7 @@ internal sealed class BrowserLaunchHostedService(
 
         try
         {
+            logger.LogDebug("Launching Steak browser UI at {Address}", address);
             Process.Start(new ProcessStartInfo
             {
                 FileName = address,

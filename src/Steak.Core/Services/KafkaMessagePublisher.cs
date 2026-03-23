@@ -35,33 +35,84 @@ internal sealed class KafkaMessagePublisher(
 
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Producer);
 
-        using var producer = new ProducerBuilder<byte[], byte[]>(config)
-            .SetKeySerializer(Serializers.ByteArray)
-            .SetValueSerializer(Serializers.ByteArray)
-            .Build();
-
-        logger.LogInformation("Publishing Kafka message to topic {Topic} via session {SessionId}", normalized.Topic, sessionId);
-
-        var message = new Message<byte[], byte[]>
+        if (logger.IsEnabled(LogLevel.Debug))
         {
-            Key = string.IsNullOrWhiteSpace(normalized.KeyBase64) ? null! : Convert.FromBase64String(normalized.KeyBase64),
-            Value = Convert.FromBase64String(normalized.ValueBase64),
-            Headers = KafkaMessageHelpers.BuildHeaders(normalized.Headers),
-            Timestamp = normalized.TimestampUtc.HasValue
-                ? new Timestamp(normalized.TimestampUtc.Value.UtcDateTime)
-                : Timestamp.Default
-        };
+            logger.LogDebug(
+                "Publishing Kafka message with session {SessionId}, config {KafkaConfig}, envelope {EnvelopeSummary}",
+                sessionId,
+                KafkaDiagnostics.FormatConfig(config),
+                KafkaDiagnostics.FormatEnvelopeSummary(normalized));
+        }
 
-        var result = await producer.ProduceAsync(normalized.Topic, message, cancellationToken).ConfigureAwait(false);
-        return new PublishResultInfo
+        try
         {
-            Topic = result.Topic,
-            Partition = result.Partition.Value,
-            Offset = result.Offset.Value,
-            TimestampUtc = result.Timestamp.UtcDateTime == DateTime.MinValue
-                ? null
-                : new DateTimeOffset(result.Timestamp.UtcDateTime, TimeSpan.Zero),
-            Status = result.Status.ToString()
-        };
+            using var producer = new ProducerBuilder<byte[], byte[]>(config)
+                .SetKeySerializer(Serializers.ByteArray)
+                .SetValueSerializer(Serializers.ByteArray)
+                .SetErrorHandler((_, error) =>
+                {
+                    if (error.IsFatal)
+                    {
+                        logger.LogCritical(
+                            "Fatal Kafka producer error for topic {Topic} via session {SessionId}: {Reason}",
+                            normalized.Topic,
+                            sessionId,
+                            error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Kafka producer warning for topic {Topic} via session {SessionId}: {Reason}",
+                            normalized.Topic,
+                            sessionId,
+                            error.Reason);
+                    }
+                })
+                .Build();
+
+            var message = new Message<byte[], byte[]>
+            {
+                Key = string.IsNullOrWhiteSpace(normalized.KeyBase64) ? null! : Convert.FromBase64String(normalized.KeyBase64),
+                Value = Convert.FromBase64String(normalized.ValueBase64),
+                Headers = KafkaMessageHelpers.BuildHeaders(normalized.Headers),
+                Timestamp = normalized.TimestampUtc.HasValue
+                    ? new Timestamp(normalized.TimestampUtc.Value.UtcDateTime)
+                    : Timestamp.Default
+            };
+
+            logger.LogDebug(
+                "Sending Kafka message to topic {Topic} via session {SessionId}. Key bytes: {KeyBytes}. Value bytes: {ValueBytes}. Headers: {HeaderCount}",
+                normalized.Topic,
+                sessionId,
+                message.Key?.Length ?? 0,
+                message.Value.Length,
+                message.Headers?.Count ?? 0);
+
+            var result = await producer.ProduceAsync(normalized.Topic, message, cancellationToken).ConfigureAwait(false);
+
+            logger.LogDebug(
+                "Kafka publish succeeded for topic {Topic} via session {SessionId}. Partition {Partition}, offset {Offset}, status {Status}",
+                result.Topic,
+                sessionId,
+                result.Partition.Value,
+                result.Offset.Value,
+                result.Status);
+
+            return new PublishResultInfo
+            {
+                Topic = result.Topic,
+                Partition = result.Partition.Value,
+                Offset = result.Offset.Value,
+                TimestampUtc = result.Timestamp.UtcDateTime == DateTime.MinValue
+                    ? null
+                    : new DateTimeOffset(result.Timestamp.UtcDateTime, TimeSpan.Zero),
+                Status = result.Status.ToString()
+            };
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Kafka publish failed for topic {Topic} via session {SessionId}", normalized.Topic, sessionId);
+            throw;
+        }
     }
 }

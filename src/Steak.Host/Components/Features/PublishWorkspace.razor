@@ -1,3 +1,4 @@
+@inject ILogger<PublishWorkspace> Logger
 @inject IMessagePublisher MessagePublisher
 @inject IMessagePreviewService MessagePreviewService
 @inject ITopicBrowserService TopicBrowserService
@@ -276,7 +277,8 @@ Use "Load Sample" to see the expected format.
         }
         catch (Exception ex)
         {
-            _singleError = ex.Message;
+            Logger.LogError(ex, "Publish workspace failed to refresh topics for session {SessionId}", ConnectionSessionId);
+            _singleError = UiErrorMessage.Build("Refresh topics", ex);
             if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
                 await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
         }
@@ -323,13 +325,25 @@ Use "Load Sample" to see the expected format.
             };
             _batchStatus = await BatchPublishService.StartAsync(request).ConfigureAwait(false);
         }
-        catch (Exception ex) { _batchError = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to start batch publish for session {SessionId}", ConnectionSessionId);
+            _batchError = UiErrorMessage.Build("Start batch publish", ex);
+        }
     }
 
     private async Task StopBatchAsync()
     {
-        await BatchPublishService.StopAsync().ConfigureAwait(false);
-        _batchStatus = BatchPublishService.Snapshot;
+        try
+        {
+            await BatchPublishService.StopAsync().ConfigureAwait(false);
+            _batchStatus = BatchPublishService.Snapshot;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to stop batch publish for session {SessionId}", ConnectionSessionId);
+            _batchError = UiErrorMessage.Build("Stop batch publish", ex);
+        }
     }
 
     private void ResetTemplate()
@@ -364,7 +378,11 @@ Use "Load Sample" to see the expected format.
             _singleError = null;
             await InvokeAsync(StateHasChanged).ConfigureAwait(false);
         }
-        catch (Exception ex) { _singleError = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to preview the message envelope");
+            _singleError = UiErrorMessage.Build("Preview message", ex);
+        }
     }
 
     private Task FormatAsync()
@@ -375,7 +393,11 @@ Use "Load Sample" to see the expected format.
             _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
             _singleError = null;
         }
-        catch (Exception ex) { _singleError = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to pretty format the message envelope");
+            _singleError = UiErrorMessage.Build("Pretty format", ex);
+        }
         return Task.CompletedTask;
     }
 
@@ -396,7 +418,11 @@ Use "Load Sample" to see the expected format.
             }).ConfigureAwait(false);
             _singleError = null;
         }
-        catch (Exception ex) { _singleError = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to publish a message for session {SessionId}", ConnectionSessionId);
+            _singleError = UiErrorMessage.Build("Publish message", ex);
+        }
     }
 
     private SteakMessageEnvelope ParseEnvelope()
