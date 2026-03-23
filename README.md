@@ -19,13 +19,13 @@ Steak does not persist Kafka credentials or connection profiles. You can open mu
 
 ### Connect and discover topics
 
-- Connect to Kafka using SASL authentication (username and password are required).
+- Connect to Kafka over `Plaintext`, `Ssl`, `SaslPlaintext`, or `SaslSsl`.
 - Open multiple connection tabs for different clusters at the same time.
 - Switch between connections instantly without reloading.
-- The client id defaults to your username when not explicitly set.
 - Refresh cluster metadata and list all visible topics from the connected broker.
 - Use friendly Kafka values such as `SaslPlaintext`, `SaslSsl`, `Plain`, `ScramSha256`, and `ScramSha512`.
-- New connections default to `SaslPlaintext` plus `ScramSha512`. Use `Plain` only when your broker is configured for SASL/PLAIN.
+- New connections default to `SaslPlaintext` plus `ScramSha512`.
+- Username and password are required only for SASL protocols.
 
 ### View messages
 
@@ -48,81 +48,24 @@ Steak does not persist Kafka credentials or connection profiles. You can open mu
 
 ## Run Modes
 
-### 1. Windows release mode (`.exe`)
+### Windows release mode (`.exe`)
 
 This is the mode to use if you want a Windows executable without installing the .NET runtime or SDK.
 
-Windows downloads include:
-
-- `Steak.exe`
-- `Steak-win-x64-portable.zip`
-
-The recommended download is `Steak-win-x64-portable.zip`. It contains the full published layout. `Steak.exe` is also available separately.
-
-Use the prebuilt release:
-
-1. Download the latest release assets.
-2. Extract `Steak-win-x64-portable.zip` to a folder of your choice.
-3. Run `Steak.exe`.
-4. Steak opens your default browser automatically at `http://127.0.0.1:4040`.
-
-Notes:
-
-- The Windows build is self-contained. No .NET runtime installation is required.
-- Steak auto-opens your default browser when it starts outside Docker.
-- Steak stores mutable data in the first writable location it can use:
-  `%LOCALAPPDATA%\\Steak`, then `.steak` next to the executable, then `.steak` under the content root, then the system temp folder.
-
-Create the `.exe` yourself from source:
-
-```powershell
-dotnet restore
-dotnet publish .\src\Steak.Host\Steak.Host.csproj -c Release -p:PublishProfile=Steak-win-x64
-```
-
-Output:
-
-```text
-artifacts\publish\win-x64\Steak.exe
-artifacts\publish\win-x64\*
-```
-
-Package a portable zip from the published output:
-
-```powershell
-$releaseDir = Join-Path $PWD 'artifacts\release'
-$zipPath = Join-Path $releaseDir 'Steak-win-x64-portable.zip'
-New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-Compress-Archive -Path .\artifacts\publish\win-x64\* -DestinationPath $zipPath
-```
-
-Smoke-test the published executable:
-
-```powershell
-.\scripts\verify-standalone.ps1
-```
-
-Using the published `.exe`:
-
-1. Keep `Steak.exe` in the published folder, or extract the portable zip without deleting any files next to it.
-2. Double-click `Steak.exe`, or launch it from PowerShell:
+Run the prebuilt executable:
 
 ```powershell
 .\artifacts\publish\win-x64\Steak.exe
 ```
 
-3. Wait for the browser to open on `http://127.0.0.1:4040`.
-4. Create a connection. The form defaults to `SaslPlaintext` and `ScramSha512`.
-5. If you are using the bundled `docker-compose.yml` Kafka stack, change `SASL Mechanism` to `Plain` before connecting because that sample broker is configured for SASL/PLAIN.
+Default behavior:
 
-### 2. Docker mode
+- Steak binds to `http://127.0.0.1:4040`.
+- The UI, API, and Swagger all share that same port.
+- Steak opens your default browser automatically unless you disable it.
+- The Windows build is self-contained. No .NET runtime installation is required.
 
-Pull from Docker Hub:
-
-```powershell
-docker pull <docker-username>/steak:latest
-```
+### Docker mode
 
 Run the container:
 
@@ -133,70 +76,114 @@ docker run --rm `
   <docker-username>/steak:latest
 ```
 
-Open:
+Default behavior:
 
-- App: `http://localhost:8080`
-- Swagger: `http://localhost:8080/swagger`
-
-Notes:
-
-- The container stores exported data under `/data` by default.
+- The container listens on port `8080`.
+- With `-p 8080:8080`, the UI, API, and Swagger are available on `http://localhost:8080`.
 - Browser auto-launch stays disabled in Docker mode.
-- If Kafka is also running in Docker, put Steak and Kafka on the same network and use the Kafka container hostname.
+- Exported files are stored under `/data` inside the container.
 
-### 3. Source mode (`dotnet run`)
+### Source mode (`dotnet run`)
+
+Run Steak directly from source:
 
 ```powershell
 dotnet restore
 dotnet run --project .\src\Steak.Host\Steak.Host.csproj
 ```
 
-Steak opens your default browser automatically at `http://127.0.0.1:4040`.
+Default behavior:
 
-## Local Kafka Quick Start
+- Steak binds to `http://127.0.0.1:4040`.
+- The UI, API, and Swagger all share that same port.
+- Steak opens your default browser automatically unless you disable it.
 
-The repository includes a `docker-compose.yml` that starts a SASL-authenticated Kafka broker with 10 pre-created topics.
+## Runtime Flags
 
-### Start Kafka with docker-compose
+Steak supports these CLI flags in `.exe` mode and in `dotnet run` mode.
+
+### `--port`
+
+Overrides only the port while keeping the default host behavior.
+
+- Default outside Docker: `127.0.0.1:4040`
+- The UI, API, and Swagger stay on the same port
+
+Examples:
 
 ```powershell
-docker compose up -d
+.\artifacts\publish\win-x64\Steak.exe --port 5050
+dotnet run --project .\src\Steak.Host\Steak.Host.csproj -- --port 5050
 ```
 
-This starts Kafka on `localhost:9092` with SASL/PLAIN authentication and creates these topics automatically:
+Those commands bind Steak to `http://127.0.0.1:5050`.
 
-| Topic                   | Partitions |
-| ----------------------- | ---------- |
-| `orders`                | 3          |
-| `payments`              | 2          |
-| `users`                 | 2          |
-| `notifications`         | 1          |
-| `audit-log`             | 3          |
-| `inventory.updates`     | 2          |
-| `shipping.events`       | 2          |
-| `analytics.clickstream` | 4          |
-| `platform.health`       | 1          |
-| `customer.feedback`     | 2          |
+### `--urls`
 
-### Connect from Steak
+Overrides the full ASP.NET Core binding URL. Use this when you need something more specific than just changing the port.
 
-Use these settings:
-
-| Field             | Value                           |
-| ----------------- | ------------------------------- |
-| Bootstrap Servers | `localhost:9092`                |
-| Username          | `admin`                         |
-| Password          | `admin`                         |
-| Security Protocol | `SaslPlaintext` (auto-detected) |
-| SASL Mechanism    | `Plain`                         |
-
-Steak defaults new connections to `SaslPlaintext` and `ScramSha512`.
-For this bundled Docker Compose broker, explicitly switch the mechanism to `Plain`.
-
-### Stop Kafka
+Examples:
 
 ```powershell
-docker compose down
+.\artifacts\publish\win-x64\Steak.exe --urls http://127.0.0.1:5055
+.\artifacts\publish\win-x64\Steak.exe --urls http://0.0.0.0:5055
+```
+
+If you pass both `--urls` and `--port`, `--urls` wins.
+
+### `--log-level`
+
+Controls the minimum console log level.
+
+Supported values:
+
+- `Trace`
+- `Debug`
+- `Information`
+- `Warning`
+- `Error`
+- `Fatal`
+
+Example:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --log-level Debug
+```
+
+`Debug` logs intentionally dump the full Kafka connection settings and effective Kafka client config, including raw credentials and PEM values. Use it only in a trusted local terminal session.
+
+### `--open-browser`
+
+Controls whether Steak opens the browser automatically on startup.
+
+- Default outside Docker: `true`
+- Effective default in Docker: disabled
+
+Examples:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --open-browser false
+dotnet run --project .\src\Steak.Host\Steak.Host.csproj -- --open-browser false
+```
+
+### Common examples
+
+Run headless on the default local port:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --open-browser false
+```
+
+Run headless on a custom port with verbose logs:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --port 5050 --log-level Debug --open-browser false
+```
+
+Expose Steak on a specific network binding:
+
+```powershell
+.\artifacts\publish\win-x64\Steak.exe --urls http://0.0.0.0:5055 --log-level Information --open-browser false
 ```
 
 ## Using The UI
@@ -204,14 +191,15 @@ docker compose down
 ### Connect
 
 1. Click `+ New Connection`.
-2. Enter bootstrap servers (e.g. `localhost:9092`).
-3. Enter username and password (required for all connections).
-4. Security protocol defaults to `SaslPlaintext` and mechanism to `ScramSha512`.
-5. If you are connecting to the bundled `docker-compose.yml` broker, change the mechanism to `Plain`.
-6. Click `Connect`.
-7. Use `Refresh Topics` to reload cluster metadata.
+2. Enter bootstrap servers such as `broker-1:9092,broker-2:9092`.
+3. Choose the correct security protocol.
+4. Enter username and password only when using `SaslPlaintext` or `SaslSsl`.
+5. Adjust the SASL mechanism if your cluster requires something other than the default `ScramSha512`.
+6. Add SSL PEM values only when your cluster requires them.
+7. Click `Connect`.
+8. Use `Refresh Topics` to reload cluster metadata.
 
-You can open multiple connections by clicking `+ New Connection` again. Each connection appears as a tab. Click the `×` on a tab to disconnect from that cluster.
+You can open multiple connections by clicking `+ New Connection` again. Each connection appears as a tab.
 
 ### View workspace
 
@@ -221,8 +209,6 @@ You can open multiple connections by clicking `+ New Connection` again. Each con
 4. Select a topic.
 5. Click `Start Live View`.
 6. Select a message row to inspect headers and decoded payload previews.
-
-You can stop the live session at any time from the same workspace.
 
 ### Consume workspace
 
@@ -288,7 +274,7 @@ Publish output:
 artifacts\publish\win-x64\
 ```
 
-This folder contains the runnable `Steak.exe`. To create the same portable zip that the release workflow attaches, compress the contents into `artifacts\release\Steak-win-x64-portable.zip`.
+This folder contains the runnable `Steak.exe`.
 
 ### Build the Docker image locally
 

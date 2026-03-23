@@ -120,6 +120,69 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
+    public void Connect_AllowsPlaintextWithoutCredentials()
+    {
+        var response = _service.Connect(new ConnectRequest
+        {
+            Settings = new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "Plaintext",
+                SaslMechanism = "Plain"
+            }
+        });
+
+        var settings = _service.GetActiveSettings(response.ConnectionSessionId);
+
+        Assert.Equal("Plaintext", settings.SecurityProtocol);
+        Assert.Null(settings.Username);
+        Assert.Null(settings.Password);
+        Assert.Equal("Plain", settings.SaslMechanism);
+    }
+
+    [Fact]
+    public void Connect_AllowsSslWithoutCredentials()
+    {
+        var response = _service.Connect(new ConnectRequest
+        {
+            Settings = new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "Ssl",
+                SslCaPem = "ca-pem"
+            }
+        });
+
+        var settings = _service.GetActiveSettings(response.ConnectionSessionId);
+
+        Assert.Equal("Ssl", settings.SecurityProtocol);
+        Assert.Null(settings.Username);
+        Assert.Null(settings.Password);
+        Assert.Equal("ca-pem", settings.SslCaPem);
+    }
+
+    [Fact]
+    public void Connect_DefaultsClientIdFromUsernameBeforeDroppingPlaintextCredentials()
+    {
+        var response = _service.Connect(new ConnectRequest
+        {
+            Settings = new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "Plaintext",
+                Username = "local-user",
+                Password = "ignored"
+            }
+        });
+
+        var settings = _service.GetActiveSettings(response.ConnectionSessionId);
+
+        Assert.Equal("local-user", settings.ClientId);
+        Assert.Null(settings.Username);
+        Assert.Null(settings.Password);
+    }
+
+    [Fact]
     public void Connect_ThrowsWhenRequestNull()
     {
         Assert.Throws<ArgumentNullException>(() => _service.Connect(null!));

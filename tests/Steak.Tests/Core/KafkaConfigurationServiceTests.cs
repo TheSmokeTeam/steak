@@ -5,6 +5,8 @@ namespace Steak.Tests.Core;
 
 public sealed class KafkaConfigurationServiceTests
 {
+    private readonly KafkaConfigurationService _service = new();
+
     [Fact]
     public void BuildConfig_MergesSettingsAndOverrides()
     {
@@ -18,9 +20,7 @@ public sealed class KafkaConfigurationServiceTests
             SaslMechanism = "ScramSha512"
         };
 
-        var service = new KafkaConfigurationService();
-
-        var config = service.BuildConfig(
+        var config = _service.BuildConfig(
             settings,
             KafkaClientKind.Producer,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -45,9 +45,7 @@ public sealed class KafkaConfigurationServiceTests
             BootstrapServers = "localhost:9092"
         };
 
-        var service = new KafkaConfigurationService();
-
-        var config = service.BuildConfig(settings, KafkaClientKind.Consumer);
+        var config = _service.BuildConfig(settings, KafkaClientKind.Consumer);
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
         Assert.Equal("sasl_plaintext", config["security.protocol"]);
@@ -62,9 +60,7 @@ public sealed class KafkaConfigurationServiceTests
             BootstrapServers = " broker-a:9092, broker-b:9092 ,,broker-c:9092 "
         };
 
-        var service = new KafkaConfigurationService();
-
-        var config = service.BuildConfig(settings, KafkaClientKind.Consumer);
+        var config = _service.BuildConfig(settings, KafkaClientKind.Consumer);
 
         Assert.Equal("broker-a:9092,broker-b:9092,broker-c:9092", config["bootstrap.servers"]);
     }
@@ -78,10 +74,123 @@ public sealed class KafkaConfigurationServiceTests
             Password = "secretpass"
         };
 
-        var service = new KafkaConfigurationService();
-
-        var config = service.GetMaskedConfig(settings, KafkaClientKind.Consumer);
+        var config = _service.GetMaskedConfig(settings, KafkaClientKind.Consumer);
 
         Assert.Equal("se***ss", config["sasl.password"]);
+    }
+
+    [Theory]
+    [InlineData("Plaintext", "plaintext")]
+    [InlineData("plaintext", "plaintext")]
+    [InlineData("SaslPlaintext", "sasl_plaintext")]
+    [InlineData("sasl_ssl", "sasl_ssl")]
+    [InlineData("SSL", "ssl")]
+    public void BuildConfig_NormalizesSecurityProtocolTokens(string input, string expected)
+    {
+        var config = _service.BuildConfig(
+            new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = input
+            },
+            KafkaClientKind.Admin);
+
+        Assert.Equal(expected, config["security.protocol"]);
+    }
+
+    [Theory]
+    [InlineData("Plain", "PLAIN")]
+    [InlineData("plain", "PLAIN")]
+    [InlineData("ScramSha256", "SCRAM-SHA-256")]
+    [InlineData("scram-sha-512", "SCRAM-SHA-512")]
+    [InlineData("OAuthBearer", "OAUTHBEARER")]
+    [InlineData("Gssapi", "GSSAPI")]
+    public void BuildConfig_NormalizesSaslMechanismTokens(string input, string expected)
+    {
+        var config = _service.BuildConfig(
+            new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "SaslPlaintext",
+                SaslMechanism = input,
+                Username = "admin",
+                Password = "secret"
+            },
+            KafkaClientKind.Admin);
+
+        Assert.Equal(expected, config["sasl.mechanism"]);
+    }
+
+    [Fact]
+    public void BuildConfig_OmitsSaslSettingsForPlaintext()
+    {
+        var config = _service.BuildConfig(
+            new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "Plaintext",
+                SaslMechanism = "ScramSha512",
+                Username = "admin",
+                Password = "secret"
+            },
+            KafkaClientKind.Admin);
+
+        Assert.Equal("plaintext", config["security.protocol"]);
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.mechanism", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.username", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.password", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildConfig_OmitsSaslSettingsForSslButKeepsSslFields()
+    {
+        var config = _service.BuildConfig(
+            new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "Ssl",
+                SaslMechanism = "Plain",
+                Username = "admin",
+                Password = "secret",
+                SslCaPem = "ca-pem",
+                SslCertificatePem = "cert-pem",
+                SslKeyPem = "key-pem",
+                SslKeyPassword = "key-pass"
+            },
+            KafkaClientKind.Consumer);
+
+        Assert.Equal("ssl", config["security.protocol"]);
+        Assert.Equal("ca-pem", config["ssl.ca.pem"]);
+        Assert.Equal("cert-pem", config["ssl.certificate.pem"]);
+        Assert.Equal("key-pem", config["ssl.key.pem"]);
+        Assert.Equal("key-pass", config["ssl.key.password"]);
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.mechanism", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.username", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.password", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GetMaskedConfig_MasksEverySensitiveValue()
+    {
+        var config = _service.GetMaskedConfig(
+            new KafkaConnectionSettings
+            {
+                BootstrapServers = "localhost:9092",
+                SecurityProtocol = "SaslSsl",
+                SaslMechanism = "Plain",
+                Username = "admin",
+                Password = "secretpass",
+                SslCaPem = "ca-secret",
+                SslCertificatePem = "cert-secret",
+                SslKeyPem = "key-secret",
+                SslKeyPassword = "pw-secret"
+            },
+            KafkaClientKind.Admin);
+
+        Assert.Equal("se***ss", config["sasl.password"]);
+        Assert.Equal("ca***et", config["ssl.ca.pem"]);
+        Assert.Equal("ce***et", config["ssl.certificate.pem"]);
+        Assert.Equal("ke***et", config["ssl.key.pem"]);
+        Assert.Equal("pw***et", config["ssl.key.password"]);
     }
 }

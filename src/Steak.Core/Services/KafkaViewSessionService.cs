@@ -43,6 +43,15 @@ internal sealed class KafkaViewSessionService(
             throw new InvalidOperationException("topic is required to start a view session.");
         }
 
+        logger.LogDebug(
+            "Starting Kafka view session request. SessionId {SessionId}, topic {Topic}, partition {Partition}, offset mode {OffsetMode}, group {GroupId}, max messages {MaxMessages}",
+            request.ConnectionSessionId,
+            request.Topic,
+            request.Partition,
+            request.OffsetMode,
+            request.GroupId,
+            request.MaxMessages);
+
         await StopAsync().ConfigureAwait(false);
 
         var settings = sessionService.GetActiveSettings(request.ConnectionSessionId);
@@ -52,6 +61,14 @@ internal sealed class KafkaViewSessionService(
         config["auto.offset.reset"] = request.OffsetMode.ToAutoOffsetReset().ToString().ToLowerInvariant();
         config["enable.auto.commit"] = "false";
         config["enable.partition.eof"] = "false";
+
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                "Kafka view session config for session {SessionId}: {KafkaConfig}",
+                request.ConnectionSessionId,
+                KafkaDiagnostics.FormatConfig(config));
+        }
 
         var runnerCancellation = new CancellationTokenSource();
         lock (_sync)
@@ -87,6 +104,11 @@ internal sealed class KafkaViewSessionService(
             _runnerCancellation = null;
         }
 
+        if (runner is not null)
+        {
+            logger.LogDebug("Stopping active Kafka view session");
+        }
+
         cancellation?.Cancel();
         if (runner is not null)
         {
@@ -96,6 +118,7 @@ internal sealed class KafkaViewSessionService(
             }
             catch (OperationCanceledException)
             {
+                logger.LogDebug("Kafka view session stop observed operation cancellation");
             }
         }
 
@@ -106,6 +129,10 @@ internal sealed class KafkaViewSessionService(
     {
         var channel = Channel.CreateUnbounded<SteakMessageEnvelope>();
         var snapshot = Snapshot;
+
+        logger.LogDebug(
+            "Registering Kafka view stream subscriber. Buffered messages available: {BufferedCount}",
+            snapshot.RecentMessages.Count);
 
         // New subscribers immediately receive the buffered snapshot, then live fan-out from the running session.
         foreach (var message in snapshot.RecentMessages)
@@ -150,6 +177,13 @@ internal sealed class KafkaViewSessionService(
             subscribers = [.. _subscribers];
         }
 
+        logger.LogDebug(
+            "Kafka view session published message to subscribers. Topic {Topic}, partition {Partition}, offset {Offset}, subscribers {SubscriberCount}",
+            envelope.Topic,
+            envelope.Partition,
+            envelope.Offset,
+            subscribers.Count);
+
         foreach (var subscriber in subscribers)
         {
             subscriber.Writer.TryWrite(envelope);
@@ -167,49 +201,86 @@ internal sealed class KafkaViewSessionService(
                 .SetValueDeserializer(Deserializers.ByteArray)
                 .SetErrorHandler((_, error) =>
                 {
-                    if (!error.IsFatal)
+                    if (error.IsFatal)
                     {
-                        return;
+                        logger.LogCritical(
+                            "Fatal Kafka consumer error in view session {SessionId} for topic {Topic}: {Reason}",
+                            request.ConnectionSessionId,
+                            request.Topic,
+                            error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Kafka consumer warning in view session {SessionId} for topic {Topic}: {Reason}",
+                            request.ConnectionSessionId,
+                            request.Topic,
+                            error.Reason);
                     }
 
-                    UpdateError(error.Reason);
+                    UpdateError($"Kafka consumer error: {error.Reason}");
+                })
+                .SetPartitionsAssignedHandler((_, partitions) =>
+                {
+                    logger.LogDebug(
+                        "Kafka view session assigned partitions for topic {Topic}: {Partitions}",
+                        request.Topic,
+                        string.Join(", ", partitions.Select(partition => partition.ToString())));
+                })
+                .SetPartitionsRevokedHandler((_, partitions) =>
+                {
+                    logger.LogDebug(
+                        "Kafka view session revoked partitions for topic {Topic}: {Partitions}",
+                        request.Topic,
+                        string.Join(", ", partitions.Select(partition => partition.ToString())));
                 })
                 .Build();
 
             if (request.Partition.HasValue)
             {
-                consumer.Assign(new TopicPartitionOffset(request.Topic, request.Partition.Value, request.OffsetMode.ToOffset()));
+                var assignment = new TopicPartitionOffset(request.Topic, request.Partition.Value, request.OffsetMode.ToOffset());
+                logger.LogDebug("Assigning Kafka view session to {Assignment}", assignment);
+                consumer.Assign(assignment);
             }
             else
             {
+                logger.LogDebug("Subscribing Kafka view session to topic {Topic}", request.Topic);
                 consumer.Subscribe(request.Topic);
             }
-
-            logger.LogInformation(
-                "Started Kafka view session for topic {Topic} using session {SessionId}",
-                request.Topic,
-                request.ConnectionSessionId);
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 var result = consumer.Consume(cancellationToken);
                 if (result?.Message is null)
                 {
+                    logger.LogDebug("Kafka view session consume cycle returned no message for topic {Topic}", request.Topic);
                     continue;
                 }
 
+                logger.LogDebug(
+                    "Kafka view session consumed message. Topic {Topic}, partition {Partition}, offset {Offset}, key bytes {KeyBytes}, value bytes {ValueBytes}, headers {HeaderCount}",
+                    result.Topic,
+                    result.Partition.Value,
+                    result.Offset.Value,
+                    result.Message.Key?.Length ?? 0,
+                    result.Message.Value?.Length ?? 0,
+                    result.Message.Headers?.Count ?? 0);
+
                 PublishMessage(request, envelopeFactory.Create(request.ConnectionSessionId, result));
+                await Task.Yield();
             }
 
+            logger.LogDebug("Closing Kafka view session consumer for topic {Topic}", request.Topic);
             consumer.Close();
         }
         catch (OperationCanceledException)
         {
+            logger.LogDebug("Kafka view session consume loop cancelled for topic {Topic}", request.Topic);
         }
         catch (Exception exception)
         {
             logger.LogError(exception, "Kafka view session failed for topic {Topic}", request.Topic);
-            UpdateError(exception.Message);
+            UpdateError(SteakErrorDetails.Format(exception));
         }
         finally
         {
@@ -220,12 +291,21 @@ internal sealed class KafkaViewSessionService(
     private void CompleteSession()
     {
         List<Channel<SteakMessageEnvelope>> subscribers;
+        ViewSessionStatus snapshot;
+
         lock (_sync)
         {
             _snapshot.IsRunning = false;
+            snapshot = Clone(_snapshot);
             subscribers = [.. _subscribers];
             _subscribers.Clear();
         }
+
+        logger.LogDebug(
+            "Kafka view session completed for topic {Topic}. Received {ReceivedCount} messages. Last error: {LastError}",
+            snapshot.Topic,
+            snapshot.ReceivedCount,
+            snapshot.LastError);
 
         foreach (var subscriber in subscribers)
         {
@@ -242,6 +322,7 @@ internal sealed class KafkaViewSessionService(
             _snapshot.LastError = error;
         }
 
+        logger.LogError("Kafka view session state updated with error: {Error}", error);
         NotifyStateChanged();
     }
 

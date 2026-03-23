@@ -11,6 +11,8 @@ internal sealed class KafkaTopicBrowserService(
 {
     public Task<IReadOnlyList<KafkaTopicSummary>> ListTopicsAsync(string connectionSessionId, CancellationToken cancellationToken = default)
     {
+        logger.LogDebug("Listing Kafka topics for session {SessionId}", connectionSessionId);
+
         var settings = sessionService.GetActiveSettings(connectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Admin);
 
@@ -20,22 +22,63 @@ internal sealed class KafkaTopicBrowserService(
         if (!config.ContainsKey("request.timeout.ms"))
             config["request.timeout.ms"] = "5000";
 
-        using var adminClient = new AdminClientBuilder(config).Build();
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                "Kafka admin topic-list config for session {SessionId}: {KafkaConfig}",
+                connectionSessionId,
+                KafkaDiagnostics.FormatConfig(config));
+        }
 
-        logger.LogInformation("Listing Kafka topics for session {SessionId}", connectionSessionId);
-        var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(5));
-        var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
+        try
+        {
+            using var adminClient = new AdminClientBuilder(config)
+                .SetErrorHandler((_, error) =>
+                {
+                    if (error.IsFatal)
+                    {
+                        logger.LogCritical(
+                            "Fatal Kafka admin error while listing topics for session {SessionId}: {Reason}",
+                            connectionSessionId,
+                            error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Kafka admin warning while listing topics for session {SessionId}: {Reason}",
+                            connectionSessionId,
+                            error.Reason);
+                    }
+                })
+                .Build();
 
-        IReadOnlyList<KafkaTopicSummary> result = metadata.Topics
-            .OrderBy(topic => topic.Topic)
-            .Select(topic => ToSummary(topic, brokers))
-            .ToArray();
+            var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(5));
+            var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
 
-        return Task.FromResult(result);
+            logger.LogDebug(
+                "Kafka metadata lookup for session {SessionId} returned {BrokerCount} broker(s) and {TopicCount} topic(s)",
+                connectionSessionId,
+                metadata.Brokers.Count,
+                metadata.Topics.Count);
+
+            IReadOnlyList<KafkaTopicSummary> result = metadata.Topics
+                .OrderBy(topic => topic.Topic)
+                .Select(topic => ToSummary(topic, brokers))
+                .ToArray();
+
+            return Task.FromResult(result);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Kafka topic listing failed for session {SessionId}", connectionSessionId);
+            throw;
+        }
     }
 
     public Task<KafkaTopicSummary?> GetTopicAsync(string connectionSessionId, string topic, CancellationToken cancellationToken = default)
     {
+        logger.LogDebug("Fetching Kafka topic metadata for {Topic} in session {SessionId}", topic, connectionSessionId);
+
         var settings = sessionService.GetActiveSettings(connectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Admin);
 
@@ -44,14 +87,55 @@ internal sealed class KafkaTopicBrowserService(
         if (!config.ContainsKey("request.timeout.ms"))
             config["request.timeout.ms"] = "5000";
 
-        using var adminClient = new AdminClientBuilder(config).Build();
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                "Kafka admin topic-detail config for session {SessionId}: {KafkaConfig}",
+                connectionSessionId,
+                KafkaDiagnostics.FormatConfig(config));
+        }
 
-        logger.LogInformation("Fetching Kafka topic metadata for {Topic} in session {SessionId}", topic, connectionSessionId);
-        var metadata = adminClient.GetMetadata(topic, TimeSpan.FromSeconds(5));
-        var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
+        try
+        {
+            using var adminClient = new AdminClientBuilder(config)
+                .SetErrorHandler((_, error) =>
+                {
+                    if (error.IsFatal)
+                    {
+                        logger.LogCritical(
+                            "Fatal Kafka admin error while fetching topic {Topic} for session {SessionId}: {Reason}",
+                            topic,
+                            connectionSessionId,
+                            error.Reason);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Kafka admin warning while fetching topic {Topic} for session {SessionId}: {Reason}",
+                            topic,
+                            connectionSessionId,
+                            error.Reason);
+                    }
+                })
+                .Build();
 
-        var details = metadata.Topics.FirstOrDefault(candidate => string.Equals(candidate.Topic, topic, StringComparison.Ordinal));
-        return Task.FromResult(details is null ? null : ToSummary(details, brokers));
+            var metadata = adminClient.GetMetadata(topic, TimeSpan.FromSeconds(5));
+            var brokers = metadata.Brokers.ToDictionary(broker => broker.BrokerId, broker => $"{broker.Host}:{broker.Port}");
+
+            logger.LogDebug(
+                "Kafka topic metadata lookup for {Topic} returned {BrokerCount} broker(s) and {TopicCount} topic record(s)",
+                topic,
+                metadata.Brokers.Count,
+                metadata.Topics.Count);
+
+            var details = metadata.Topics.FirstOrDefault(candidate => string.Equals(candidate.Topic, topic, StringComparison.Ordinal));
+            return Task.FromResult(details is null ? null : ToSummary(details, brokers));
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Kafka topic metadata fetch failed for {Topic} in session {SessionId}", topic, connectionSessionId);
+            throw;
+        }
     }
 
     private static KafkaTopicSummary ToSummary(TopicMetadata metadata, IReadOnlyDictionary<int, string> brokers)
@@ -73,5 +157,4 @@ internal sealed class KafkaTopicBrowserService(
                 .ToList()
         };
     }
-
 }

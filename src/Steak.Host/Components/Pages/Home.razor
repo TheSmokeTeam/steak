@@ -1,4 +1,5 @@
 @page "/"
+@inject ILogger<Home> Logger
 @inject ITopicBrowserService TopicBrowserService
 
 <PageTitle>Steak</PageTitle>
@@ -36,7 +37,7 @@ Usually your cluster's advertised listeners.</span></span></span>
                         <input @bind="_settings.BootstrapServers" placeholder="broker-1:9092,broker-2:9092" />
                     </label>
                     <label>
-                        <span>Username (required) <span class="tooltip-icon">?<span class="tooltip-text">SASL username for authenticating to the cluster.
+                        <span>Username @GetCredentialRequirementLabel() <span class="tooltip-icon">?<span class="tooltip-text">SASL username for authenticating to the cluster.
 Used with SASL_PLAINTEXT or SASL_SSL protocols.
 Also used as a default Client Id and Consumer Group
 if those fields are left empty.
@@ -44,7 +45,7 @@ Typically an ACL principal or service account.</span></span></span>
                         <input @bind="_settings.Username" placeholder="" />
                     </label>
                     <label>
-                        <span>Password (required) <span class="tooltip-icon">?<span class="tooltip-text">SASL password paired with the username above.
+                        <span>Password @GetCredentialRequirementLabel() <span class="tooltip-icon">?<span class="tooltip-text">SASL password paired with the username above.
 Sent during the SASL handshake before any data flows.
 Keep this secret — it is never stored to disk.
 For SCRAM mechanisms the password is hashed.
@@ -136,7 +137,7 @@ Example: request.timeout.ms=10000</span></span></span>
 
                 <div class="button-row">
                     <button class="primary-button" @onclick="ConnectAsync"
-                            disabled="@(_connecting || string.IsNullOrWhiteSpace(_settings.BootstrapServers) || string.IsNullOrWhiteSpace(_settings.Username) || string.IsNullOrWhiteSpace(_settings.Password))">
+                            disabled="@(!CanConnect())">
                         @if (_connecting)
                         {
                             <span>Connecting...</span>
@@ -229,19 +230,34 @@ Example: request.timeout.ms=10000</span></span></span>
             _connecting = true;
             StateHasChanged();
 
-            if (!string.IsNullOrWhiteSpace(_advancedOverrideText))
-            {
-                _settings.AdvancedOverrides = KeyValueTextParser.Parse(_advancedOverrideText);
-            }
+            _settings.AdvancedOverrides = string.IsNullOrWhiteSpace(_advancedOverrideText)
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : KeyValueTextParser.Parse(_advancedOverrideText);
+
+            var requiresSasl = RequiresSasl(_settings.SecurityProtocol);
 
             // Auto-set security protocol and mechanism for SASL when not set.
             if (string.IsNullOrWhiteSpace(_settings.SecurityProtocol))
             {
                 _settings.SecurityProtocol = "SaslPlaintext";
             }
-            if (string.IsNullOrWhiteSpace(_settings.SaslMechanism))
+            if (requiresSasl && string.IsNullOrWhiteSpace(_settings.SaslMechanism))
             {
                 _settings.SaslMechanism = "ScramSha512";
+            }
+
+            if (requiresSasl)
+            {
+                Logger.LogInformation(
+                    "Kafka connection attempt requested from UI for {BootstrapServers} as user {Username}",
+                    _settings.BootstrapServers,
+                    _settings.Username);
+            }
+            else
+            {
+                Logger.LogInformation(
+                    "Kafka connection attempt requested from UI for {BootstrapServers} without SASL credentials",
+                    _settings.BootstrapServers);
             }
 
             // If editing, disconnect the old session first
@@ -258,13 +274,23 @@ Example: request.timeout.ms=10000</span></span></span>
             {
                 await TopicBrowserService.ListTopicsAsync(response.ConnectionSessionId).ConfigureAwait(false);
             }
-            catch
+            catch (Exception exception)
             {
-                // Connection failed — remove the session and surface the error.
                 SessionService.Disconnect(response.ConnectionSessionId);
+                Logger.LogError(
+                    exception,
+                    "Kafka connection validation failed for UI session {SessionId}",
+                    response.ConnectionSessionId);
                 throw new InvalidOperationException(
-                    "Unable to connect to the Kafka cluster. Please verify your bootstrap servers, credentials, security protocol, and network connectivity.");
+                    UiErrorMessage.Build(
+                        "Unable to connect to the Kafka cluster. Verify the bootstrap servers, credentials, security protocol, and network path.",
+                        exception),
+                    exception);
             }
+
+            Logger.LogInformation(
+                "Kafka connection validated successfully for UI session {SessionId}",
+                response.ConnectionSessionId);
 
             _sessions = SessionService.GetAllSessions().ToList();
             _activeSession = _sessions.FirstOrDefault(s => s.ConnectionSessionId == response.ConnectionSessionId);
@@ -274,6 +300,7 @@ Example: request.timeout.ms=10000</span></span></span>
         }
         catch (Exception exception)
         {
+            Logger.LogError(exception, "Kafka connection attempt failed from the UI");
             _error = exception.Message;
         }
         finally
@@ -301,7 +328,8 @@ Example: request.timeout.ms=10000</span></span></span>
         }
         catch (Exception exception)
         {
-            _error = exception.Message;
+            Logger.LogError(exception, "Disconnect session request failed for session {SessionId}", sessionId);
+            _error = UiErrorMessage.Build("Disconnect session", exception);
         }
 
         return Task.CompletedTask;
@@ -328,12 +356,26 @@ Example: request.timeout.ms=10000</span></span></span>
         if (session is null) return;
 
         _editingSessionId = sessionId;
+        var current = SessionService.GetActiveSettings(sessionId);
         _settings = new KafkaConnectionSettings
         {
-            BootstrapServers = session.BootstrapServers,
-            SecurityProtocol = "SaslPlaintext",
-            SaslMechanism = "ScramSha512"
+            BootstrapServers = current.BootstrapServers,
+            Username = current.Username,
+            Password = current.Password,
+            SecurityProtocol = current.SecurityProtocol,
+            SaslMechanism = current.SaslMechanism,
+            ClientId = current.ClientId,
+            SslCaPem = current.SslCaPem,
+            SslCertificatePem = current.SslCertificatePem,
+            SslKeyPem = current.SslKeyPem,
+            SslKeyPassword = current.SslKeyPassword,
+            AdvancedOverrides = new Dictionary<string, string>(current.AdvancedOverrides, StringComparer.OrdinalIgnoreCase)
         };
+        _advancedOverrideText = string.Join(
+            Environment.NewLine,
+            _settings.AdvancedOverrides
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}={pair.Value}"));
         _showConnectForm = true;
     }
 
@@ -349,7 +391,39 @@ Example: request.timeout.ms=10000</span></span></span>
         {
             _showConnectForm = true;
             _activeSession = null;
-            _error = "Connection session was lost. Please reconnect.";
+            _error = "Connection session was lost. The server no longer has the selected Kafka session. Please reconnect.";
         }
+    }
+
+    private bool CanConnect()
+    {
+        if (_connecting || string.IsNullOrWhiteSpace(_settings.BootstrapServers))
+        {
+            return false;
+        }
+
+        if (!RequiresSasl(_settings.SecurityProtocol))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(_settings.Username)
+            && !string.IsNullOrWhiteSpace(_settings.Password);
+    }
+
+    private string GetCredentialRequirementLabel()
+    {
+        return RequiresSasl(_settings.SecurityProtocol) ? "(required for SASL)" : "(optional)";
+    }
+
+    private static bool RequiresSasl(string? securityProtocol)
+    {
+        if (string.IsNullOrWhiteSpace(securityProtocol))
+        {
+            return true;
+        }
+
+        var normalized = new string(securityProtocol.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        return normalized is "SASLPLAINTEXT" or "SASLSSL";
     }
 }

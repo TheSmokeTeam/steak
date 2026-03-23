@@ -1,8 +1,9 @@
+using Microsoft.Extensions.Logging;
 using Steak.Core.Contracts;
 
 namespace Steak.Core.Services;
 
-internal sealed class KafkaConfigurationService : IKafkaConfigurationService
+internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationService>? logger = null) : IKafkaConfigurationService
 {
     private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -20,6 +21,14 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Building Kafka {ClientKind} config from settings: {ConnectionSettings}",
+                clientKind,
+                KafkaDiagnostics.FormatSettings(settings));
+        }
+
         if (string.IsNullOrWhiteSpace(settings.BootstrapServers))
         {
             throw new InvalidOperationException("Bootstrap servers are required.");
@@ -36,15 +45,27 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
             ["bootstrap.servers"] = bootstrapServers
         };
 
+        var normalizedSecurityProtocol = NormalizeSecurityProtocol(settings.SecurityProtocol);
+        var usesSasl = UsesSasl(normalizedSecurityProtocol);
+        var usesSsl = UsesSsl(normalizedSecurityProtocol);
+
         AddIfPresent(config, "client.id", settings.ClientId);
-        AddIfPresent(config, "security.protocol", NormalizeSecurityProtocol(settings.SecurityProtocol));
-        AddIfPresent(config, "sasl.mechanism", NormalizeSaslMechanism(settings.SaslMechanism));
-        AddIfPresent(config, "sasl.username", settings.Username);
-        AddIfPresent(config, "sasl.password", settings.Password);
-        AddIfPresent(config, "ssl.ca.pem", settings.SslCaPem);
-        AddIfPresent(config, "ssl.certificate.pem", settings.SslCertificatePem);
-        AddIfPresent(config, "ssl.key.pem", settings.SslKeyPem);
-        AddIfPresent(config, "ssl.key.password", settings.SslKeyPassword);
+        AddIfPresent(config, "security.protocol", normalizedSecurityProtocol);
+
+        if (usesSasl)
+        {
+            AddIfPresent(config, "sasl.mechanism", NormalizeSaslMechanism(settings.SaslMechanism));
+            AddIfPresent(config, "sasl.username", settings.Username);
+            AddIfPresent(config, "sasl.password", settings.Password);
+        }
+
+        if (usesSsl)
+        {
+            AddIfPresent(config, "ssl.ca.pem", settings.SslCaPem);
+            AddIfPresent(config, "ssl.certificate.pem", settings.SslCertificatePem);
+            AddIfPresent(config, "ssl.key.pem", settings.SslKeyPem);
+            AddIfPresent(config, "ssl.key.password", settings.SslKeyPassword);
+        }
 
         // Advanced overrides from the connection form merge over the base fields.
         foreach (var pair in settings.AdvancedOverrides.Where(pair => !string.IsNullOrWhiteSpace(pair.Key)))
@@ -59,6 +80,14 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
             {
                 config[pair.Key] = pair.Value;
             }
+        }
+
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            logger.LogDebug(
+                "Built Kafka {ClientKind} config: {KafkaConfig}",
+                clientKind,
+                KafkaDiagnostics.FormatConfig(config));
         }
 
         return config;
@@ -125,6 +154,18 @@ internal sealed class KafkaConfigurationService : IKafkaConfigurationService
     private static string NormalizeToken(string value)
     {
         return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+    }
+
+    private static bool UsesSasl(string? normalizedSecurityProtocol)
+    {
+        return string.Equals(normalizedSecurityProtocol, "sasl_plaintext", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedSecurityProtocol, "sasl_ssl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool UsesSsl(string? normalizedSecurityProtocol)
+    {
+        return string.Equals(normalizedSecurityProtocol, "ssl", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedSecurityProtocol, "sasl_ssl", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Mask(string key, string value)

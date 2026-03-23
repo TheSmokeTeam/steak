@@ -1,4 +1,5 @@
 @implements IDisposable
+@inject ILogger<ConsumeWorkspace> Logger
 @inject IConsumeExportService ConsumeExportService
 @inject ITopicBrowserService TopicBrowserService
 @inject IFileNameFactory FileNameFactory
@@ -271,7 +272,8 @@ Use IAM roles instead of keys when possible.</span></span></span>
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            Logger.LogError(ex, "Consume workspace failed to refresh topics for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Refresh topics", ex);
             if (ex.Message.Contains("No active connection session", StringComparison.OrdinalIgnoreCase))
                 await OnSessionLost.InvokeAsync(ConnectionSessionId).ConfigureAwait(false);
         }
@@ -321,13 +323,25 @@ Use IAM roles instead of keys when possible.</span></span></span>
             };
             _jobStatus = await ConsumeExportService.StartAsync(request).ConfigureAwait(false);
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Consume workspace failed to start export job for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Start export", ex);
+        }
     }
 
     private async Task StopAsync()
     {
-        await ConsumeExportService.StopAsync().ConfigureAwait(false);
-        _jobStatus = ConsumeExportService.Snapshot;
+        try
+        {
+            await ConsumeExportService.StopAsync().ConfigureAwait(false);
+            _jobStatus = ConsumeExportService.Snapshot;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Consume workspace failed to stop export job for session {SessionId}", ConnectionSessionId);
+            _error = UiErrorMessage.Build("Stop export", ex);
+        }
     }
 
     private string BuildFileNamePreview()
