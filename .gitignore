@@ -28,3 +28,4 @@ Desktop.ini
 
 # Local-only release and agent helpers
 .github/agents/
+scripts/

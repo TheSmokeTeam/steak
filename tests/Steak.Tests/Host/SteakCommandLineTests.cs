@@ -44,4 +44,13 @@ public sealed class SteakCommandLineTests
 
         Assert.Equal(expected, openBrowser);
     }
+
+    [Fact]
+    public void ParseOpenBrowser_ThrowsForUnsupportedValue()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            SteakCommandLine.ParseOpenBrowser(["--open-browser", "maybe"]));
+
+        Assert.Contains("Unsupported value 'maybe' for --open-browser", exception.Message);
+    }
 }

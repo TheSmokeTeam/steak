@@ -45,15 +45,27 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
             ["bootstrap.servers"] = bootstrapServers
         };
 
+        var normalizedSecurityProtocol = NormalizeSecurityProtocol(settings.SecurityProtocol);
+        var usesSasl = UsesSasl(normalizedSecurityProtocol);
+        var usesSsl = UsesSsl(normalizedSecurityProtocol);
+
         AddIfPresent(config, "client.id", settings.ClientId);
-        AddIfPresent(config, "security.protocol", NormalizeSecurityProtocol(settings.SecurityProtocol));
-        AddIfPresent(config, "sasl.mechanism", NormalizeSaslMechanism(settings.SaslMechanism));
-        AddIfPresent(config, "sasl.username", settings.Username);
-        AddIfPresent(config, "sasl.password", settings.Password);
-        AddIfPresent(config, "ssl.ca.pem", settings.SslCaPem);
-        AddIfPresent(config, "ssl.certificate.pem", settings.SslCertificatePem);
-        AddIfPresent(config, "ssl.key.pem", settings.SslKeyPem);
-        AddIfPresent(config, "ssl.key.password", settings.SslKeyPassword);
+        AddIfPresent(config, "security.protocol", normalizedSecurityProtocol);
+
+        if (usesSasl)
+        {
+            AddIfPresent(config, "sasl.mechanism", NormalizeSaslMechanism(settings.SaslMechanism));
+            AddIfPresent(config, "sasl.username", settings.Username);
+            AddIfPresent(config, "sasl.password", settings.Password);
+        }
+
+        if (usesSsl)
+        {
+            AddIfPresent(config, "ssl.ca.pem", settings.SslCaPem);
+            AddIfPresent(config, "ssl.certificate.pem", settings.SslCertificatePem);
+            AddIfPresent(config, "ssl.key.pem", settings.SslKeyPem);
+            AddIfPresent(config, "ssl.key.password", settings.SslKeyPassword);
+        }
 
         // Advanced overrides from the connection form merge over the base fields.
         foreach (var pair in settings.AdvancedOverrides.Where(pair => !string.IsNullOrWhiteSpace(pair.Key)))
@@ -142,6 +154,18 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
     private static string NormalizeToken(string value)
     {
         return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+    }
+
+    private static bool UsesSasl(string? normalizedSecurityProtocol)
+    {
+        return string.Equals(normalizedSecurityProtocol, "sasl_plaintext", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedSecurityProtocol, "sasl_ssl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool UsesSsl(string? normalizedSecurityProtocol)
+    {
+        return string.Equals(normalizedSecurityProtocol, "ssl", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedSecurityProtocol, "sasl_ssl", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Mask(string key, string value)
