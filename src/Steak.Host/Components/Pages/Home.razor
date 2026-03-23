@@ -67,14 +67,14 @@ PLAINTEXT — no encryption or SASL (dev only).</span></span></span>
                     </label>
                     <label>
                         <span>SASL Mechanism <span class="tooltip-icon">?<span class="tooltip-text">Authentication algorithm used during SASL handshake.
-SCRAM-SHA-512 — secure challenge-response (default).
-SCRAM-SHA-256 — lighter SCRAM variant.
+SCRAM-SHA-256 — QaaS-compatible default and common cluster setting.
+SCRAM-SHA-512 — stronger hash variant when the cluster requires it.
 PLAIN — simple username/password (needs SSL).
 OAUTHBEARER / GSSAPI — token or Kerberos auth.</span></span></span>
                         <select @bind="_settings.SaslMechanism">
                             <option value="Plain">PLAIN</option>
-                            <option value="ScramSha512">SCRAM-SHA-512</option>
                             <option value="ScramSha256">SCRAM-SHA-256</option>
+                            <option value="ScramSha512">SCRAM-SHA-512</option>
                             <option value="OAuthBearer">OAUTHBEARER</option>
                             <option value="Gssapi">GSSAPI (Kerberos)</option>
                         </select>
@@ -243,7 +243,7 @@ Example: request.timeout.ms=10000</span></span></span>
             }
             if (requiresSasl && string.IsNullOrWhiteSpace(_settings.SaslMechanism))
             {
-                _settings.SaslMechanism = "ScramSha512";
+                _settings.SaslMechanism = "ScramSha256";
             }
 
             if (requiresSasl)

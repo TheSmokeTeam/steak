@@ -49,7 +49,7 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("SaslPlaintext", settings.SecurityProtocol);
-        Assert.Equal("ScramSha512", settings.SaslMechanism);
+        Assert.Equal("ScramSha256", settings.SaslMechanism);
     }
 
     [Fact]

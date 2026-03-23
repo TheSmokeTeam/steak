@@ -49,7 +49,7 @@ public sealed class KafkaConfigurationServiceTests
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
         Assert.Equal("sasl_plaintext", config["security.protocol"]);
-        Assert.Equal("SCRAM-SHA-512", config["sasl.mechanism"]);
+        Assert.Equal("SCRAM-SHA-256", config["sasl.mechanism"]);
     }
 
     [Fact]

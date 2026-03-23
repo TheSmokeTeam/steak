@@ -93,7 +93,7 @@ public sealed class KafkaConnectionSettings
     /// Optional SASL mechanism. Friendly names such as <c>Plain</c>,
     /// <c>ScramSha256</c>, and <c>ScramSha512</c> are accepted.
     /// </summary>
-    public string SaslMechanism { get; set; } = "ScramSha512";
+    public string SaslMechanism { get; set; } = "ScramSha256";
 
     /// <summary>
     /// Optional client id applied to all connection types.

@@ -24,7 +24,7 @@ Steak does not persist Kafka credentials or connection profiles. You can open mu
 - Switch between connections instantly without reloading.
 - Refresh cluster metadata and list all visible topics from the connected broker.
 - Use friendly Kafka values such as `SaslPlaintext`, `SaslSsl`, `Plain`, `ScramSha256`, and `ScramSha512`.
-- New connections default to `SaslPlaintext` plus `ScramSha512`.
+- New connections default to `SaslPlaintext` plus `ScramSha256`.
 - Username and password are required only for SASL protocols.
 
 ### View messages
@@ -194,7 +194,7 @@ Expose Steak on a specific network binding:
 2. Enter bootstrap servers such as `broker-1:9092,broker-2:9092`.
 3. Choose the correct security protocol.
 4. Enter username and password only when using `SaslPlaintext` or `SaslSsl`.
-5. Adjust the SASL mechanism if your cluster requires something other than the default `ScramSha512`.
+5. Adjust the SASL mechanism if your cluster requires something other than the default `ScramSha256`.
 6. Add SSL PEM values only when your cluster requires them.
 7. Click `Connect`.
 8. Use `Refresh Topics` to reload cluster metadata.

@@ -64,7 +64,7 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
 
         if (requiresSasl && string.IsNullOrWhiteSpace(request.Settings.SaslMechanism))
         {
-            request.Settings.SaslMechanism = "ScramSha512";
+            request.Settings.SaslMechanism = "ScramSha256";
         }
 
         if (!requiresSasl)
