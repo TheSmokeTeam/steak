@@ -317,9 +317,10 @@ Key endpoints:
 ## Release Notes
 
 - Project files keep `VersionPrefix` at `0.0.0`, and release identity is driven by the Git tag.
-- Pushing a stable Git tag such as `1.0.3` triggers the Windows release workflow and publishes the GitHub release assets.
-- The same stable tag also drives Docker image publication and updates the Docker Hub repository description directly from this `README.md`, so Docker Hub stays aligned with the repository docs.
-- Tags that include a prerelease suffix such as `-alpha.1` publish a GitHub prerelease, but skip Docker `latest`.
+- Pushing a stable Git tag such as `1.1.1` triggers the tag CI pipeline.
+- That tag pipeline runs build and test first, pushes the Docker image to Docker Hub, then creates the GitHub release only after those jobs succeed.
+- Each GitHub release includes `Steak.exe` and `Steak-win-x64-portable.zip` as downloadable assets.
+- Tags that include a prerelease suffix such as `-alpha.1` still create a GitHub prerelease, but skip Docker `latest`.
 
 ## Steak Envelope Format
 

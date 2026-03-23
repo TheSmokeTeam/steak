@@ -39,6 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Classify tag
+        id: tag-kind
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check Docker Hub secrets
         id: docker-secrets
         shell: bash
@@ -47,23 +57,20 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Docker Hub secrets are not configured. Skipping image push."
+            echo "Docker Hub secrets are not configured."
           fi
 
-      - name: Check release tag
-        if: steps.docker-secrets.outputs.enabled == 'true'
-        id: release-tag
+      - name: Require Docker publish prerequisites for stable tags
+        if: steps.tag-kind.outputs.stable == 'true'
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Tag '${GITHUB_REF_NAME}' is a prerelease tag. Skipping Docker image publish."
+          if [[ "${{ steps.docker-secrets.outputs.enabled }}" != "true" ]]; then
+            echo "Stable tag '${GITHUB_REF_NAME}' requires DOCKER_USERNAME and DOCKER_PASSWORD secrets." >&2
+            exit 1
           fi
 
       - name: Set Docker tags
-        if: steps.docker-secrets.outputs.enabled == 'true' && steps.release-tag.outputs.enabled == 'true'
+        if: steps.docker-secrets.outputs.enabled == 'true' && steps.tag-kind.outputs.stable == 'true'
         id: docker-tags
         shell: bash
         run: |
@@ -77,18 +84,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
-        if: steps.docker-secrets.outputs.enabled == 'true' && steps.release-tag.outputs.enabled == 'true'
+        if: steps.docker-secrets.outputs.enabled == 'true' && steps.tag-kind.outputs.stable == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Set up Docker Buildx
-        if: steps.docker-secrets.outputs.enabled == 'true' && steps.release-tag.outputs.enabled == 'true'
+        if: steps.docker-secrets.outputs.enabled == 'true' && steps.tag-kind.outputs.stable == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Publish to Docker Hub
-        if: steps.docker-secrets.outputs.enabled == 'true' && steps.release-tag.outputs.enabled == 'true'
+        if: steps.docker-secrets.outputs.enabled == 'true' && steps.tag-kind.outputs.stable == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -98,7 +105,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Update Docker Hub overview
-        if: steps.docker-secrets.outputs.enabled == 'true' && steps.release-tag.outputs.enabled == 'true'
+        if: steps.docker-secrets.outputs.enabled == 'true' && steps.tag-kind.outputs.stable == 'true'
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -106,3 +113,51 @@ jobs:
           repository: ${{ steps.docker-tags.outputs.image }}
           short-description: Self-hosted Kafka viewer, exporter, and publisher.
           readme-filepath: ./README.md
+
+  windows-release:
+    needs: [build-and-test, docker]
+    runs-on: windows-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --verbosity normal
+
+      - name: Publish standalone exe
+        run: dotnet publish .\src\Steak.Host\Steak.Host.csproj -c Release -p:PublishProfile=Steak-win-x64
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'artifacts\release'
+          $zipPath = Join-Path $releaseDir 'Steak-win-x64-portable.zip'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path .\artifacts\publish\win-x64\* -DestinationPath $zipPath
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            artifacts/publish/win-x64/Steak.exe
+            artifacts/release/Steak-win-x64-portable.zip
