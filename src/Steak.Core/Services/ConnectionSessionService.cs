@@ -55,21 +55,15 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
             ? null
             : request.Settings.Password.Trim();
 
-        // Default client id to username when not explicitly set and a username exists.
-        if (string.IsNullOrWhiteSpace(request.Settings.ClientId)
-            && !string.IsNullOrWhiteSpace(request.Settings.Username))
-        {
-            request.Settings.ClientId = request.Settings.Username.Trim();
-        }
-
         if (requiresSasl && string.IsNullOrWhiteSpace(request.Settings.SaslMechanism))
         {
-            request.Settings.SaslMechanism = "ScramSha512";
+            request.Settings.SaslMechanism = "ScramSha256";
         }
+
+        request.Settings.ClientId = KafkaConnectionIdentity.ResolveClientId(request.Settings);
 
         if (!requiresSasl)
         {
-            request.Settings.Username = null;
             request.Settings.Password = null;
             request.Settings.SaslMechanism = string.IsNullOrWhiteSpace(request.Settings.SaslMechanism)
                 ? string.Empty

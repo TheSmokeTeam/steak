@@ -1,8 +1,10 @@
+@implements IDisposable
 @inject ILogger<PublishWorkspace> Logger
 @inject IMessagePublisher MessagePublisher
 @inject IMessagePreviewService MessagePreviewService
 @inject ITopicBrowserService TopicBrowserService
 @inject IBatchPublishService BatchPublishService
+@inject ILocalFolderPicker FolderPicker
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -35,12 +37,11 @@ Each file becomes one Kafka message.</span></span></span>
                 <span>Source Folder <span class="tooltip-icon">?<span class="tooltip-text">Local directory containing Steak envelope JSON files.
 All .json files in the folder are read and published.
 Files are processed in alphabetical order.
-Use the Browse button to pick a file as a hint.
+Use the Browse button to choose the source folder directly.
 Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
                 <div class="browse-row">
                     <input @bind="_sourceFsPath" placeholder="D:\KafkaExports" />
-                    <InputFile OnChange="OnSourceFolderHintSelected" class="browse-input" id="publish-folder-picker" accept="*" />
-                    <label for="publish-folder-picker" class="ghost-button browse-button">Browse</label>
+                    <button class="ghost-button browse-button" @onclick="BrowseSourceFolderAsync">Browse</button>
                 </div>
             </label>
         }
@@ -252,6 +253,12 @@ Use "Load Sample" to see the expected format.
         && (_sourceTransport != BatchTransportKind.FileSystem || !string.IsNullOrWhiteSpace(_sourceFsPath))
         && (_sourceTransport != BatchTransportKind.S3 || !string.IsNullOrWhiteSpace(_sourceS3Bucket));
 
+    protected override void OnInitialized()
+    {
+        _batchStatus = BatchPublishService.Snapshot;
+        BatchPublishService.StateChanged += HandleBatchStateChanged;
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (!string.Equals(_loadedSessionId, ConnectionSessionId, StringComparison.Ordinal)
@@ -431,10 +438,29 @@ Use "Load Sample" to see the expected format.
         return envelope ?? throw new InvalidOperationException("The envelope editor is empty.");
     }
 
-    private void OnSourceFolderHintSelected(InputFileChangeEventArgs e)
+    private async Task BrowseSourceFolderAsync()
     {
-        var name = e.File?.Name;
-        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(_sourceFsPath))
-            _sourceFsPath = name;
+        try
+        {
+            var selectedPath = await FolderPicker.PickFolderAsync(_sourceFsPath).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+            {
+                _sourceFsPath = selectedPath;
+                _batchError = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to open the folder picker");
+            _batchError = UiErrorMessage.Build("Choose source folder", ex);
+        }
     }
+
+    private void HandleBatchStateChanged(object? sender, EventArgs e)
+    {
+        _batchStatus = BatchPublishService.Snapshot;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => BatchPublishService.StateChanged -= HandleBatchStateChanged;
 }

@@ -17,7 +17,7 @@ public sealed class KafkaConfigurationServiceTests
             Username = "demo-user",
             Password = "secretpass",
             SecurityProtocol = "SaslPlaintext",
-            SaslMechanism = "ScramSha512"
+            SaslMechanism = "ScramSha256"
         };
 
         var config = _service.BuildConfig(
@@ -30,11 +30,11 @@ public sealed class KafkaConfigurationServiceTests
             });
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
-        Assert.Equal("override-client", config["client.id"]);
+        Assert.Equal("demo-user", config["client.id"]);
         Assert.Equal("7", config["linger.ms"]);
         Assert.Equal("secretpass", config["sasl.password"]);
         Assert.Equal("sasl_plaintext", config["security.protocol"]);
-        Assert.Equal("SCRAM-SHA-512", config["sasl.mechanism"]);
+        Assert.Equal("SCRAM-SHA-256", config["sasl.mechanism"]);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public sealed class KafkaConfigurationServiceTests
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
         Assert.Equal("sasl_plaintext", config["security.protocol"]);
-        Assert.Equal("SCRAM-SHA-512", config["sasl.mechanism"]);
+        Assert.Equal("SCRAM-SHA-256", config["sasl.mechanism"]);
     }
 
     [Fact]

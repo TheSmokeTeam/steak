@@ -49,7 +49,7 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("SaslPlaintext", settings.SecurityProtocol);
-        Assert.Equal("ScramSha512", settings.SaslMechanism);
+        Assert.Equal("ScramSha256", settings.SaslMechanism);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
-    public void Connect_PreservesExplicitClientId()
+    public void Connect_OverridesExplicitClientIdWithUsername()
     {
         _service.Connect(new ConnectRequest
         {
@@ -80,7 +80,7 @@ public sealed class ConnectionSessionServiceTests
         var sessions = _service.GetAllSessions();
         var settings = _service.GetActiveSettings(sessions[0].ConnectionSessionId!);
 
-        Assert.Equal("custom-client", settings.ClientId);
+        Assert.Equal("admin", settings.ClientId);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
-    public void Connect_DefaultsClientIdFromUsernameBeforeDroppingPlaintextCredentials()
+    public void Connect_UsesUsernameForClientIdWithoutDroppingPlaintextIdentity()
     {
         var response = _service.Connect(new ConnectRequest
         {
@@ -178,7 +178,7 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("local-user", settings.ClientId);
-        Assert.Null(settings.Username);
+        Assert.Equal("local-user", settings.Username);
         Assert.Null(settings.Password);
     }
 

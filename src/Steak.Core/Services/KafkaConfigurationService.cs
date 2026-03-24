@@ -44,12 +44,13 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
         {
             ["bootstrap.servers"] = bootstrapServers
         };
+        var effectiveClientId = KafkaConnectionIdentity.ResolveClientId(settings);
 
         var normalizedSecurityProtocol = NormalizeSecurityProtocol(settings.SecurityProtocol);
         var usesSasl = UsesSasl(normalizedSecurityProtocol);
         var usesSsl = UsesSsl(normalizedSecurityProtocol);
 
-        AddIfPresent(config, "client.id", settings.ClientId);
+        AddIfPresent(config, "client.id", effectiveClientId);
         AddIfPresent(config, "security.protocol", normalizedSecurityProtocol);
 
         if (usesSasl)
@@ -81,6 +82,8 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
                 config[pair.Key] = pair.Value;
             }
         }
+
+        config["client.id"] = effectiveClientId;
 
         if (logger?.IsEnabled(LogLevel.Debug) == true)
         {

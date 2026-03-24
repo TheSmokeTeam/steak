@@ -93,10 +93,11 @@ public sealed class KafkaConnectionSettings
     /// Optional SASL mechanism. Friendly names such as <c>Plain</c>,
     /// <c>ScramSha256</c>, and <c>ScramSha512</c> are accepted.
     /// </summary>
-    public string SaslMechanism { get; set; } = "ScramSha512";
+    public string SaslMechanism { get; set; } = "ScramSha256";
 
     /// <summary>
-    /// Optional client id applied to all connection types.
+    /// Client id applied to all connection types.
+    /// Steak derives this from <see cref="Username"/> so it stays aligned with consumer identity.
     /// </summary>
     public string? ClientId { get; set; }
 
@@ -605,6 +606,7 @@ public sealed class CreateConsumeJobRequest
 
     /// <summary>
     /// Consumer group id used for the export worker.
+    /// Steak derives this from the connection username and ignores conflicting caller values.
     /// </summary>
     public string GroupId { get; set; } = string.Empty;
 
@@ -721,7 +723,8 @@ public sealed class StartViewSessionRequest
     public MessageOffsetMode OffsetMode { get; set; } = MessageOffsetMode.Latest;
 
     /// <summary>
-    /// Optional caller-supplied consumer group id. Steak generates an ephemeral group when omitted.
+    /// Optional caller-supplied consumer group id.
+    /// Steak derives this from the connection username and ignores conflicting caller values.
     /// </summary>
     public string? GroupId { get; set; }
 

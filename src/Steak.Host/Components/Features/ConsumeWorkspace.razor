@@ -3,6 +3,7 @@
 @inject IConsumeExportService ConsumeExportService
 @inject ITopicBrowserService TopicBrowserService
 @inject IFileNameFactory FileNameFactory
+@inject ILocalFolderPicker FolderPicker
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -27,14 +28,6 @@ You must select a topic before starting.</span></span></span>
                     <option value="@topic.Name">@topic.Name</option>
                 }
             </select>
-        </label>
-        <label>
-            <span>Consumer Group <span class="tooltip-icon">?<span class="tooltip-text">Kafka consumer group for offset tracking.
-Defaults to your username when left empty.
-Stored offsets let you resume where you stopped.
-Multiple consumers in the same group split work.
-Use a unique group to consume independently.</span></span></span>
-            <input @bind="_groupId" placeholder="steak-export-orders" />
         </label>
         <label>
             <span>Partition <span class="tooltip-icon">?<span class="tooltip-text">Limit consumption to a single partition.
@@ -104,13 +97,12 @@ File names include topic, partition, and timestamp.</span></span></span>
             <label>
                 <span>Folder Path <span class="tooltip-icon">?<span class="tooltip-text">Local directory where exported files are saved.
 The folder is created automatically if it doesn't exist.
-Use the Browse button to pick a file as a hint.
+Use the Browse button to choose the destination folder directly.
 Each message is saved as a separate JSON file.
 Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
                 <div class="browse-row">
                     <input @bind="_fsPath" placeholder="D:\KafkaExports" />
-                    <InputFile OnChange="OnFolderHintSelected" class="browse-input" id="consume-folder-picker" accept="*" />
-                    <label for="consume-folder-picker" class="ghost-button browse-button">Browse</label>
+                    <button class="ghost-button browse-button" @onclick="BrowseDestinationFolderAsync">Browse</button>
                 </div>
             </label>
         }
@@ -175,7 +167,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
 
     <div class="metric-grid">
         <div class="metric-card"><strong>Topic</strong><span>@(_selectedTopic ?? "Not selected")</span></div>
-        <div class="metric-card"><strong>Group</strong><span>@(string.IsNullOrWhiteSpace(_groupId) ? "Required" : _groupId)</span></div>
+        <div class="metric-card"><strong>Identity</strong><span>@EffectiveConsumerIdentity</span></div>
         <div class="metric-card"><strong>Throughput</strong><span>@_jobStatus.CurrentMessagesPerSecond.ToString("F1") msg/s</span></div>
         <div class="metric-card"><strong>Offset mode</strong><span>@_offsetMode</span></div>
     </div>
@@ -214,7 +206,6 @@ Use IAM roles instead of keys when possible.</span></span></span>
     private readonly List<KafkaTopicSummary> _topics = [];
     private ConsumeJobStatus _jobStatus = new();
     private string? _selectedTopic;
-    private string _groupId = string.Empty;
     private string _partitionValue = string.Empty;
     private string? _error;
     private string? _loadedSessionId;
@@ -231,9 +222,11 @@ Use IAM roles instead of keys when possible.</span></span></span>
     private double _messagesPerSecond;
 
     private KafkaTopicSummary? SelectedTopicSummary => _topics.FirstOrDefault(t => t.Name == _selectedTopic);
+    private string EffectiveConsumerIdentity => string.IsNullOrWhiteSpace(Username)
+        ? (string.IsNullOrWhiteSpace(Environment.UserName) ? "steak" : Environment.UserName)
+        : Username;
     private bool CanStart => !string.IsNullOrWhiteSpace(ConnectionSessionId)
         && !string.IsNullOrWhiteSpace(_selectedTopic)
-        && !string.IsNullOrWhiteSpace(_groupId)
         && (_transportKind != BatchTransportKind.FileSystem || !string.IsNullOrWhiteSpace(_fsPath))
         && (_transportKind != BatchTransportKind.S3 || !string.IsNullOrWhiteSpace(_s3Bucket));
 
@@ -266,8 +259,6 @@ Use IAM roles instead of keys when possible.</span></span></span>
             if (_topics.Count > 0 && !_topics.Any(t => t.Name == _selectedTopic))
             {
                 _selectedTopic = _topics[0].Name;
-                if (string.IsNullOrWhiteSpace(_groupId))
-                    _groupId = !string.IsNullOrWhiteSpace(Username) ? Username : $"steak-export-{_selectedTopic}";
             }
         }
         catch (Exception ex)
@@ -314,7 +305,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
             {
                 ConnectionSessionId = ConnectionSessionId,
                 Topic = _selectedTopic!,
-                GroupId = _groupId,
+                GroupId = EffectiveConsumerIdentity,
                 OffsetMode = _offsetMode,
                 Partition = int.TryParse(_partitionValue, out var p) ? p : null,
                 Destination = BuildDestination(),
@@ -365,12 +356,21 @@ Use IAM roles instead of keys when possible.</span></span></span>
 
     public void Dispose() => ConsumeExportService.StateChanged -= HandleStateChanged;
 
-    private void OnFolderHintSelected(InputFileChangeEventArgs e)
+    private async Task BrowseDestinationFolderAsync()
     {
-        // Browser file picker doesn't give true folder paths, but the selected file's
-        // name hints at the parent directory. We set the path so the user sees something.
-        var name = e.File?.Name;
-        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(_fsPath))
-            _fsPath = name;
+        try
+        {
+            var selectedPath = await FolderPicker.PickFolderAsync(_fsPath).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+            {
+                _fsPath = selectedPath;
+                _error = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Consume workspace failed to open the folder picker");
+            _error = UiErrorMessage.Build("Choose destination folder", ex);
+        }
     }
 }
