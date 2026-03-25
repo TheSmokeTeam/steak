@@ -29,6 +29,12 @@
             <div class="connect-form">
                 <div class="form-grid">
                     <label>
+                        <span>Connection Name (optional) <span class="tooltip-icon">?<span class="tooltip-text">Friendly label shown in Steak's connection tabs.
+Use this to distinguish local brokers, environments, or customer clusters.
+Leave it blank to use the bootstrap servers as the tab label.</span></span></span>
+                        <input @bind="_settings.ConnectionName" />
+                    </label>
+                    <label>
                         <span>Bootstrap Servers <span class="tooltip-icon">?<span class="tooltip-text">Comma-separated list of Kafka broker addresses.
 Each entry is host:port. The client will discover
 the full cluster from any reachable broker.
@@ -37,27 +43,26 @@ Usually your cluster's advertised listeners.</span></span></span>
                         <input @bind="_settings.BootstrapServers" placeholder="broker-1:9092,broker-2:9092" />
                     </label>
                     <label>
-                        <span>Username @GetCredentialRequirementLabel() <span class="tooltip-icon">?<span class="tooltip-text">SASL username for authenticating to the cluster.
-Used with SASL_PLAINTEXT or SASL_SSL protocols.
-Also used as Steak's Client Id and Consumer Group.
-Those identities are derived automatically and cannot be edited separately.
-Typically an ACL principal or service account.</span></span></span>
+                        <span>Username (required) <span class="tooltip-icon">?<span class="tooltip-text">Username used for authenticating to the cluster.
+Steak also derives the Kafka client id and consumer group from this value.
+Use the same principal you granted topic access to on the broker.
+For the local Docker brokers in this workspace, use username.</span></span></span>
                         <input @bind="_settings.Username" placeholder="" />
                     </label>
                     <label>
-                        <span>Password @GetCredentialRequirementLabel() <span class="tooltip-icon">?<span class="tooltip-text">SASL password paired with the username above.
+                        <span>Password (required) <span class="tooltip-icon">?<span class="tooltip-text">Password paired with the username above.
 Sent during the SASL handshake before any data flows.
-Keep this secret — it is never stored to disk.
-For SCRAM mechanisms the password is hashed.
-For PLAIN it is sent in cleartext (use SSL).</span></span></span>
+Keep this secret - it is never stored to disk.
+For SCRAM mechanisms the password is hashed on the broker side.
+For the local Docker brokers in this workspace, use password.</span></span></span>
                         <input type="password" @bind="_settings.Password" />
                     </label>
                     <label>
                         <span>Security Protocol <span class="tooltip-icon">?<span class="tooltip-text">Determines encryption and authentication mode.
-SASL_SSL — SASL auth over TLS (recommended for prod).
-SASL_PLAINTEXT — SASL auth without encryption.
-SSL — TLS mutual auth with client certificates.
-PLAINTEXT — no encryption or SASL (dev only).</span></span></span>
+SASL_PLAINTEXT - SASL auth without encryption (default for local testing).
+SASL_SSL - SASL auth over TLS.
+SSL - TLS mutual auth with client certificates.
+PLAINTEXT - no encryption or SASL (dev only).</span></span></span>
                         <select @bind="_settings.SecurityProtocol">
                             <option value="SaslPlaintext">SASL_PLAINTEXT</option>
                             <option value="SaslSsl">SASL_SSL</option>
@@ -67,10 +72,10 @@ PLAINTEXT — no encryption or SASL (dev only).</span></span></span>
                     </label>
                     <label>
                         <span>SASL Mechanism <span class="tooltip-icon">?<span class="tooltip-text">Authentication algorithm used during SASL handshake.
-SCRAM-SHA-256 — secure challenge-response (default).
-SCRAM-SHA-512 — stronger digest variant.
-PLAIN — simple username/password (needs SSL).
-OAUTHBEARER / GSSAPI — token or Kerberos auth.</span></span></span>
+SCRAM-SHA-256 - secure challenge-response (default).
+SCRAM-SHA-512 - stronger digest variant.
+PLAIN - simple username/password (needs SSL).
+OAUTHBEARER / GSSAPI - token or Kerberos auth.</span></span></span>
                         <select @bind="_settings.SaslMechanism">
                             <option value="ScramSha256">SCRAM-SHA-256</option>
                             <option value="ScramSha512">SCRAM-SHA-512</option>
@@ -105,14 +110,14 @@ Used with the SSL or SASL_SSL protocols.</span></span></span>
 Used for mutual TLS authentication with the broker.
 Must correspond to the SSL Certificate PEM above.
 Paste the full key including BEGIN/END markers.
-Protect this value — it authenticates this client.</span></span></span>
+Protect this value - it authenticates this client.</span></span></span>
                             <textarea rows="3" @bind="_settings.SslKeyPem"></textarea>
                         </label>
                         <label>
                             <span>SSL Key Password <span class="tooltip-icon">?<span class="tooltip-text">Passphrase to decrypt the SSL private key PEM.
 Required only if the key PEM is encrypted.
 Leave blank if the key is in plain PEM format.
-Stored in memory only — never persisted to disk.
+Stored in memory only - never persisted to disk.
 Common when keys are exported from Java keystores.</span></span></span>
                             <input type="password" @bind="_settings.SslKeyPassword" />
                         </label>
@@ -160,8 +165,9 @@ Example: request.timeout.ms=10000</span></span></span>
                 @foreach (var session in _sessions)
                 {
                     <button class="@GetConnectionTabClass(session.ConnectionSessionId!)"
+                            title="@session.BootstrapServers"
                             @onclick="@(() => SwitchConnection(session.ConnectionSessionId!))">
-                        @session.BootstrapServers
+                        @(string.IsNullOrWhiteSpace(session.ConnectionName) ? session.BootstrapServers : session.ConnectionName)
                         <span class="tab-edit" @onclick="@(() => EditConnection(session.ConnectionSessionId!))" @onclick:stopPropagation="true">&#9998;</span>
                         <span class="tab-close" @onclick="@(() => DisconnectSessionAsync(session.ConnectionSessionId!))" @onclick:stopPropagation="true">&times;</span>
                     </button>
@@ -226,33 +232,21 @@ Example: request.timeout.ms=10000</span></span></span>
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : KeyValueTextParser.Parse(_advancedOverrideText);
 
-            var requiresSasl = RequiresSasl(_settings.SecurityProtocol);
-
-            // Auto-set security protocol and mechanism for SASL when not set.
             if (string.IsNullOrWhiteSpace(_settings.SecurityProtocol))
             {
                 _settings.SecurityProtocol = "SaslPlaintext";
             }
-            if (requiresSasl && string.IsNullOrWhiteSpace(_settings.SaslMechanism))
+
+            if (string.IsNullOrWhiteSpace(_settings.SaslMechanism))
             {
                 _settings.SaslMechanism = "ScramSha256";
             }
 
-            if (requiresSasl)
-            {
-                Logger.LogInformation(
-                    "Kafka connection attempt requested from UI for {BootstrapServers} as user {Username}",
-                    _settings.BootstrapServers,
-                    _settings.Username);
-            }
-            else
-            {
-                Logger.LogInformation(
-                    "Kafka connection attempt requested from UI for {BootstrapServers} without SASL credentials",
-                    _settings.BootstrapServers);
-            }
+            Logger.LogInformation(
+                "Kafka connection attempt requested from UI for {BootstrapServers} as user {Username}",
+                _settings.BootstrapServers,
+                _settings.Username);
 
-            // If editing, disconnect the old session first
             if (!string.IsNullOrWhiteSpace(_editingSessionId))
             {
                 SessionService.Disconnect(_editingSessionId);
@@ -261,7 +255,6 @@ Example: request.timeout.ms=10000</span></span></span>
 
             var response = SessionService.Connect(new ConnectRequest { Settings = _settings });
 
-            // Validate connection by actually reaching the cluster.
             try
             {
                 await TopicBrowserService.ListTopicsAsync(response.ConnectionSessionId).ConfigureAwait(false);
@@ -311,11 +304,13 @@ Example: request.timeout.ms=10000</span></span></span>
             {
                 _activeSession = _sessions.FirstOrDefault();
             }
+
             if (_sessions.Count == 0)
             {
                 _showConnectForm = true;
                 _activeSession = null;
             }
+
             _error = null;
         }
         catch (Exception exception)
@@ -345,12 +340,16 @@ Example: request.timeout.ms=10000</span></span></span>
     private void EditConnection(string sessionId)
     {
         var session = _sessions.FirstOrDefault(s => s.ConnectionSessionId == sessionId);
-        if (session is null) return;
+        if (session is null)
+        {
+            return;
+        }
 
         _editingSessionId = sessionId;
         var current = SessionService.GetActiveSettings(sessionId);
         _settings = new KafkaConnectionSettings
         {
+            ConnectionName = current.ConnectionName,
             BootstrapServers = current.BootstrapServers,
             Username = current.Username,
             Password = current.Password,
@@ -377,6 +376,7 @@ Example: request.timeout.ms=10000</span></span></span>
         {
             _sessions.RemoveAll(s => s.ConnectionSessionId == sessionId);
         }
+
         _activeSession = _sessions.FirstOrDefault();
         if (_sessions.Count == 0)
         {
@@ -393,28 +393,7 @@ Example: request.timeout.ms=10000</span></span></span>
             return false;
         }
 
-        if (!RequiresSasl(_settings.SecurityProtocol))
-        {
-            return true;
-        }
-
         return !string.IsNullOrWhiteSpace(_settings.Username)
             && !string.IsNullOrWhiteSpace(_settings.Password);
-    }
-
-    private string GetCredentialRequirementLabel()
-    {
-        return RequiresSasl(_settings.SecurityProtocol) ? "(required for SASL)" : "(optional)";
-    }
-
-    private static bool RequiresSasl(string? securityProtocol)
-    {
-        if (string.IsNullOrWhiteSpace(securityProtocol))
-        {
-            return true;
-        }
-
-        var normalized = new string(securityProtocol.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-        return normalized is "SASLPLAINTEXT" or "SASLSSL";
     }
 }

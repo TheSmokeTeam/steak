@@ -1,0 +1,56 @@
+@implements IDisposable
+@inject IUiToastService ToastService
+
+@if (Notifications.Count > 0)
+{
+    <aside class="toast-tray" aria-live="polite" aria-label="Notifications">
+        @foreach (var notification in Notifications)
+        {
+            <article class="toast-card @GetToastClass(notification.Kind)"
+                     data-toast-id="@notification.Id"
+                     role="status">
+                <span class="toast-indicator" aria-hidden="true"></span>
+                <div class="toast-copy">
+                    <strong class="toast-title">@notification.Title</strong>
+                    @if (!string.IsNullOrWhiteSpace(notification.Message))
+                    {
+                        <p class="toast-message">@notification.Message</p>
+                    }
+                </div>
+                <button type="button"
+                        class="toast-dismiss"
+                        aria-label="Dismiss notification"
+                        @onclick="@(() => ToastService.Dismiss(notification.Id))">
+                    &times;
+                </button>
+            </article>
+        }
+    </aside>
+}
+
+@code {
+    private IReadOnlyList<UiToastNotification> Notifications => ToastService.Notifications;
+
+    protected override void OnInitialized()
+    {
+        ToastService.StateChanged += HandleStateChanged;
+    }
+
+    private void HandleStateChanged(object? sender, EventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string GetToastClass(UiToastKind kind) => kind switch
+    {
+        UiToastKind.Success => "success",
+        UiToastKind.Warning => "warning",
+        UiToastKind.Danger => "danger",
+        _ => "info"
+    };
+
+    public void Dispose()
+    {
+        ToastService.StateChanged -= HandleStateChanged;
+    }
+}

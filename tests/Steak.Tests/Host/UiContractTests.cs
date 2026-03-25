@@ -27,6 +27,30 @@ public sealed class UiContractTests : IClassFixture<SteakApiTests.TestAppFactory
     }
 
     [Fact]
+    public async Task HomePage_ConnectionForm_ShowsRequiredCredentialLabels()
+    {
+        using var client = _factory.CreateClient();
+        await client.DeleteAsync("/api/connection");
+
+        var html = await client.GetStringAsync("/");
+
+        Assert.Contains("Username (required)", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Password (required)", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HomePage_ConnectionForm_DoesNotRenderSeedConnectionNamePlaceholder()
+    {
+        using var client = _factory.CreateClient();
+        await client.DeleteAsync("/api/connection");
+
+        var html = await client.GetStringAsync("/");
+
+        Assert.Contains("Connection Name (optional)", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("placeholder=\"Local Kafka 2.7\"", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task HomePage_ConnectionForm_ListsScramSha256BeforeScramSha512()
     {
         using var client = _factory.CreateClient();
@@ -50,9 +74,11 @@ public sealed class UiContractTests : IClassFixture<SteakApiTests.TestAppFactory
         {
             Settings = new KafkaConnectionSettings
             {
+                ConnectionName = "Named Local Broker",
                 BootstrapServers = "localhost:9092",
-                SecurityProtocol = "Plaintext",
-                Username = "ui-user"
+                SecurityProtocol = "SaslPlaintext",
+                Username = "ui-user",
+                Password = "ui-pass"
             }
         });
         connectResponse.EnsureSuccessStatusCode();
@@ -60,6 +86,7 @@ public sealed class UiContractTests : IClassFixture<SteakApiTests.TestAppFactory
         var html = await client.GetStringAsync("/");
 
         Assert.Contains("Live message viewer", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Named Local Broker", html, StringComparison.OrdinalIgnoreCase);
         Assert.False(ContainsLabel(html, "Client ID"));
         Assert.False(ContainsLabel(html, "Group ID"));
     }

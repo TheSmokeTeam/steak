@@ -2,6 +2,7 @@
 @inject ILogger<ViewWorkspace> Logger
 @inject ITopicBrowserService TopicBrowserService
 @inject IViewSessionService ViewSessionService
+@inject IUiToastService ToastService
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -88,6 +89,8 @@ Does not affect what is consumed from Kafka.</span></span></span>
             @(_sessionStatus.IsRunning ? $"Streaming {_sessionStatus.ReceivedCount} messages" : "Idle")
         </span>
     </div>
+
+    <ToastTray />
 
     <div class="metric-grid">
         <div class="metric-card"><strong>Topics</strong><span>@_topics.Count loaded</span></div>
@@ -275,6 +278,7 @@ Does not affect what is consumed from Kafka.</span></span></span>
     private MessageOffsetMode _offsetMode = MessageOffsetMode.Earliest;
     private string _keyDeserializer = "UTF-8 String";
     private string _valueDeserializer = "Pretty JSON";
+    private bool _stopRequested;
 
     private static readonly string[] _deserializerFormats = [
         "UTF-8 String",
@@ -364,6 +368,7 @@ Does not affect what is consumed from Kafka.</span></span></span>
         _error = null;
         try
         {
+            _stopRequested = false;
             var request = new StartViewSessionRequest
             {
                 ConnectionSessionId = ConnectionSessionId,
@@ -386,6 +391,7 @@ Does not affect what is consumed from Kafka.</span></span></span>
     {
         try
         {
+            _stopRequested = true;
             await ViewSessionService.StopAsync().ConfigureAwait(false);
             _sessionStatus = ViewSessionService.Snapshot;
         }
@@ -404,7 +410,14 @@ Does not affect what is consumed from Kafka.</span></span></span>
 
     private void HandleStateChanged(object? sender, EventArgs e)
     {
+        var previousStatus = _sessionStatus;
         _sessionStatus = ViewSessionService.Snapshot;
+
+        if (previousStatus.IsRunning && !_sessionStatus.IsRunning)
+        {
+            ShowCompletionToast(previousStatus, _sessionStatus);
+        }
+
         _selectedMessage ??= _sessionStatus.RecentMessages.LastOrDefault();
         _ = InvokeAsync(StateHasChanged);
     }
@@ -551,5 +564,32 @@ Does not affect what is consumed from Kafka.</span></span></span>
             fieldCount++;
         }
         return sb.Length > 0 ? sb.ToString().TrimEnd() : "(empty protobuf or not protobuf)";
+    }
+
+    private static string FormatCount(long count, string noun)
+    {
+        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+    }
+
+    private void ShowCompletionToast(ViewSessionStatus previousStatus, ViewSessionStatus currentStatus)
+    {
+        var wasStopped = _stopRequested;
+        _stopRequested = false;
+
+        if (!string.IsNullOrWhiteSpace(currentStatus.LastError))
+        {
+            ToastService.Show(
+                UiToastKind.Danger,
+                wasStopped ? "Live view stopped with error" : "Live view ended with error",
+                currentStatus.LastError);
+            return;
+        }
+
+        var title = wasStopped ? "Live view stopped" : "Live view finished";
+        var verb = wasStopped ? "Stopped" : "Finished";
+
+        ToastService.ShowInfo(
+            title,
+            $"{verb} viewing {previousStatus.Topic ?? "the selected topic"} after reading {FormatCount(previousStatus.ReceivedCount, "message")}.");
     }
 }

@@ -38,16 +38,20 @@ public sealed class KafkaConfigurationServiceTests
     }
 
     [Fact]
-    public void BuildConfig_OmitsBlankOptionalSecuritySettings()
+    public void BuildConfig_DefaultsToSaslPlaintextAndScramSha256()
     {
         var settings = new KafkaConnectionSettings
         {
-            BootstrapServers = "localhost:9092"
+            BootstrapServers = "localhost:9092",
+            Username = "demo-user",
+            Password = "secretpass"
         };
 
         var config = _service.BuildConfig(settings, KafkaClientKind.Consumer);
 
         Assert.Equal("localhost:9092", config["bootstrap.servers"]);
+        Assert.Equal("demo-user", config["sasl.username"]);
+        Assert.Equal("secretpass", config["sasl.password"]);
         Assert.Equal("sasl_plaintext", config["security.protocol"]);
         Assert.Equal("SCRAM-SHA-256", config["sasl.mechanism"]);
     }
@@ -57,7 +61,9 @@ public sealed class KafkaConfigurationServiceTests
     {
         var settings = new KafkaConnectionSettings
         {
-            BootstrapServers = " broker-a:9092, broker-b:9092 ,,broker-c:9092 "
+            BootstrapServers = " broker-a:9092, broker-b:9092 ,,broker-c:9092 ",
+            Username = "demo-user",
+            Password = "secretpass"
         };
 
         var config = _service.BuildConfig(settings, KafkaClientKind.Consumer);
@@ -71,6 +77,7 @@ public sealed class KafkaConfigurationServiceTests
         var settings = new KafkaConnectionSettings
         {
             BootstrapServers = "localhost:9092",
+            Username = "demo-user",
             Password = "secretpass"
         };
 
@@ -91,7 +98,9 @@ public sealed class KafkaConfigurationServiceTests
             new KafkaConnectionSettings
             {
                 BootstrapServers = "localhost:9092",
-                SecurityProtocol = input
+                SecurityProtocol = input,
+                Username = "admin",
+                Password = "secret"
             },
             KafkaClientKind.Admin);
 
@@ -139,6 +148,38 @@ public sealed class KafkaConfigurationServiceTests
         Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.mechanism", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.username", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(config.Keys, key => string.Equals(key, "sasl.password", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildConfig_ThrowsWhenUsernameMissingForSaslConnection()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _service.BuildConfig(
+                new KafkaConnectionSettings
+                {
+                    BootstrapServers = "localhost:9092",
+                    SecurityProtocol = "SaslPlaintext",
+                    Password = "secret"
+                },
+                KafkaClientKind.Admin));
+
+        Assert.Contains("Username", ex.Message);
+    }
+
+    [Fact]
+    public void BuildConfig_ThrowsWhenPasswordMissingForSaslConnection()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _service.BuildConfig(
+                new KafkaConnectionSettings
+                {
+                    BootstrapServers = "localhost:9092",
+                    SecurityProtocol = "SaslPlaintext",
+                    Username = "admin"
+                },
+                KafkaClientKind.Admin));
+
+        Assert.Contains("Password", ex.Message);
     }
 
     [Fact]

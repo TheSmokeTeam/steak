@@ -25,6 +25,18 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
         _factory = factory;
     }
 
+    private static KafkaConnectionSettings CreateConnectionSettings(string bootstrapServers)
+    {
+        return new KafkaConnectionSettings
+        {
+            BootstrapServers = bootstrapServers,
+            Username = "username",
+            Password = "password",
+            SecurityProtocol = "SaslPlaintext",
+            SaslMechanism = "ScramSha256"
+        };
+    }
+
     [Fact]
     public async Task Connect_ReturnsSessionId()
     {
@@ -32,7 +44,7 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
 
         var response = await client.PostAsJsonAsync("/api/connection", new ConnectRequest
         {
-            Settings = new KafkaConnectionSettings { BootstrapServers = "localhost:9092" }
+            Settings = CreateConnectionSettings("localhost:9092")
         });
 
         response.EnsureSuccessStatusCode();
@@ -59,7 +71,7 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
 
         var connectResponse = await client.PostAsJsonAsync("/api/connection", new ConnectRequest
         {
-            Settings = new KafkaConnectionSettings { BootstrapServers = "localhost:9092" }
+            Settings = CreateConnectionSettings("localhost:9092")
         });
         var session = await connectResponse.Content.ReadFromJsonAsync<ConnectResponse>();
 
@@ -196,8 +208,8 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     {
         using var client = _factory.CreateClient();
 
-        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
-        var r2 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-b:9092" } });
+        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-a:9092") });
+        var r2 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-b:9092") });
 
         r1.EnsureSuccessStatusCode();
         r2.EnsureSuccessStatusCode();
@@ -215,8 +227,8 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     {
         using var client = _factory.CreateClient();
 
-        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
-        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-b:9092" } });
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-a:9092") });
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-b:9092") });
 
         var all = await client.GetFromJsonAsync<List<ConnectionSessionStatus>>("/api/connection/all");
 
@@ -229,7 +241,7 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     {
         using var client = _factory.CreateClient();
 
-        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+        var r1 = await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-a:9092") });
         r1.EnsureSuccessStatusCode();
         var c1 = await r1.Content.ReadFromJsonAsync<ConnectResponse>();
         Assert.NotNull(c1);
@@ -244,7 +256,7 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
     {
         using var client = _factory.CreateClient();
 
-        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = new KafkaConnectionSettings { BootstrapServers = "broker-a:9092" } });
+        await client.PostAsJsonAsync("/api/connection", new ConnectRequest { Settings = CreateConnectionSettings("broker-a:9092") });
 
         var disconnect = await client.DeleteAsync("/api/connection");
         Assert.Equal(HttpStatusCode.NoContent, disconnect.StatusCode);
@@ -342,9 +354,29 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
 
         public ConnectResponse Connect(ConnectRequest request)
         {
+            if (string.IsNullOrWhiteSpace(request.Settings.BootstrapServers))
+            {
+                throw new InvalidOperationException("Bootstrap servers are required to connect.");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Settings.Username))
+            {
+                throw new InvalidOperationException("Username is required to connect.");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Settings.Password))
+            {
+                throw new InvalidOperationException("Password is required to connect.");
+            }
+
             var id = Guid.NewGuid().ToString("N");
             _sessions[id] = request.Settings;
-            return new ConnectResponse { ConnectionSessionId = id, BootstrapServers = request.Settings.BootstrapServers };
+            return new ConnectResponse
+            {
+                ConnectionSessionId = id,
+                BootstrapServers = request.Settings.BootstrapServers,
+                ConnectionName = request.Settings.ConnectionName
+            };
         }
 
         public void Disconnect() => _sessions.Clear();
@@ -356,7 +388,14 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
             var first = _sessions.FirstOrDefault();
             return first.Key is null
                 ? new ConnectionSessionStatus()
-                : new ConnectionSessionStatus { IsConnected = true, ConnectionSessionId = first.Key, BootstrapServers = first.Value.BootstrapServers };
+                : new ConnectionSessionStatus
+                {
+                    IsConnected = true,
+                    ConnectionSessionId = first.Key,
+                    BootstrapServers = first.Value.BootstrapServers,
+                    ConnectionName = first.Value.ConnectionName,
+                    Username = first.Value.Username
+                };
         }
 
         public IReadOnlyList<ConnectionSessionStatus> GetAllSessions() =>
@@ -364,7 +403,9 @@ public sealed class SteakApiTests : IClassFixture<SteakApiTests.TestAppFactory>
             {
                 IsConnected = true,
                 ConnectionSessionId = kv.Key,
-                BootstrapServers = kv.Value.BootstrapServers
+                BootstrapServers = kv.Value.BootstrapServers,
+                ConnectionName = kv.Value.ConnectionName,
+                Username = kv.Value.Username
             }).ToList();
 
         public KafkaConnectionSettings GetActiveSettings(string connectionSessionId) =>

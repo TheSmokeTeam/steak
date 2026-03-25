@@ -4,6 +4,7 @@
 @inject ITopicBrowserService TopicBrowserService
 @inject IFileNameFactory FileNameFactory
 @inject ILocalFolderPicker FolderPicker
+@inject IUiToastService ToastService
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -14,6 +15,7 @@
         <button class="ghost-button" disabled="@string.IsNullOrWhiteSpace(ConnectionSessionId)" @onclick="RefreshTopicsAsync">Refresh Topics</button>
     </div>
 
+    <h3>Batch Consume</h3>
     <div class="control-grid">
         <label>
             <span>Topic <span class="tooltip-icon">?<span class="tooltip-text">Kafka topic to consume messages from.
@@ -94,7 +96,7 @@ File names include topic, partition, and timestamp.</span></span></span>
 
         @if (_transportKind == BatchTransportKind.FileSystem)
         {
-            <label>
+            <div class="field-stack">
                 <span>Folder Path <span class="tooltip-icon">?<span class="tooltip-text">Local directory where exported files are saved.
 The folder is created automatically if it doesn't exist.
 Use the Browse button to choose the destination folder directly.
@@ -102,9 +104,9 @@ Each message is saved as a separate JSON file.
 Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
                 <div class="browse-row">
                     <input @bind="_fsPath" placeholder="D:\KafkaExports" />
-                    <button class="ghost-button browse-button" @onclick="BrowseDestinationFolderAsync">Browse</button>
+                    <button type="button" class="ghost-button browse-button" @onclick="BrowseDestinationFolderAsync">Browse</button>
                 </div>
-            </label>
+            </div>
         }
         else
         {
@@ -165,11 +167,13 @@ Use IAM roles instead of keys when possible.</span></span></span>
         </span>
     </div>
 
+    <ToastTray />
+
     <div class="metric-grid">
-        <div class="metric-card"><strong>Topic</strong><span>@(_selectedTopic ?? "Not selected")</span></div>
+        <div class="metric-card"><strong>Exported</strong><span>@_jobStatus.ExportedCount</span></div>
         <div class="metric-card"><strong>Identity</strong><span>@EffectiveConsumerIdentity</span></div>
         <div class="metric-card"><strong>Throughput</strong><span>@_jobStatus.CurrentMessagesPerSecond.ToString("F1") msg/s</span></div>
-        <div class="metric-card"><strong>Offset mode</strong><span>@_offsetMode</span></div>
+        <div class="metric-card"><strong>Started</strong><span>@(_jobStatus.StartedAtUtc?.ToLocalTime().ToString("u") ?? "-")</span></div>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(_error))
@@ -220,6 +224,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
     private string _s3SecretKey = string.Empty;
     private int _maxMessages;
     private double _messagesPerSecond;
+    private bool _stopRequested;
 
     private KafkaTopicSummary? SelectedTopicSummary => _topics.FirstOrDefault(t => t.Name == _selectedTopic);
     private string EffectiveConsumerIdentity => string.IsNullOrWhiteSpace(Username)
@@ -301,6 +306,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
         _error = null;
         try
         {
+            _stopRequested = false;
             var request = new CreateConsumeJobRequest
             {
                 ConnectionSessionId = ConnectionSessionId,
@@ -325,6 +331,7 @@ Use IAM roles instead of keys when possible.</span></span></span>
     {
         try
         {
+            _stopRequested = true;
             await ConsumeExportService.StopAsync().ConfigureAwait(false);
             _jobStatus = ConsumeExportService.Snapshot;
         }
@@ -350,7 +357,14 @@ Use IAM roles instead of keys when possible.</span></span></span>
 
     private void HandleStateChanged(object? sender, EventArgs e)
     {
+        var previousStatus = _jobStatus;
         _jobStatus = ConsumeExportService.Snapshot;
+
+        if (previousStatus.IsRunning && !_jobStatus.IsRunning)
+        {
+            ShowCompletionToast(previousStatus, _jobStatus);
+        }
+
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -372,5 +386,32 @@ Use IAM roles instead of keys when possible.</span></span></span>
             Logger.LogError(ex, "Consume workspace failed to open the folder picker");
             _error = UiErrorMessage.Build("Choose destination folder", ex);
         }
+    }
+
+    private static string FormatCount(long count, string noun)
+    {
+        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+    }
+
+    private void ShowCompletionToast(ConsumeJobStatus previousStatus, ConsumeJobStatus currentStatus)
+    {
+        var wasStopped = _stopRequested;
+        _stopRequested = false;
+
+        if (!string.IsNullOrWhiteSpace(currentStatus.LastError))
+        {
+            ToastService.Show(
+                UiToastKind.Danger,
+                wasStopped ? "Consume stopped with error" : "Consume ended with error",
+                currentStatus.LastError);
+            return;
+        }
+
+        var title = wasStopped ? "Consume stopped" : "Consume finished";
+        var verb = wasStopped ? "Stopped" : "Finished";
+
+        ToastService.ShowInfo(
+            title,
+            $"{verb} consuming {previousStatus.Topic ?? "the selected topic"} after exporting {FormatCount(previousStatus.ExportedCount, "message")}.");
     }
 }
