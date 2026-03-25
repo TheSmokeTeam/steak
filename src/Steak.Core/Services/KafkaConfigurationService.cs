@@ -44,17 +44,29 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
         {
             ["bootstrap.servers"] = bootstrapServers
         };
+        var effectiveClientId = KafkaConnectionIdentity.ResolveClientId(settings);
 
         var normalizedSecurityProtocol = NormalizeSecurityProtocol(settings.SecurityProtocol);
         var usesSasl = UsesSasl(normalizedSecurityProtocol);
         var usesSsl = UsesSsl(normalizedSecurityProtocol);
+        var normalizedSaslMechanism = NormalizeSaslMechanism(settings.SaslMechanism) ?? "SCRAM-SHA-256";
 
-        AddIfPresent(config, "client.id", settings.ClientId);
+        AddIfPresent(config, "client.id", effectiveClientId);
         AddIfPresent(config, "security.protocol", normalizedSecurityProtocol);
 
         if (usesSasl)
         {
-            AddIfPresent(config, "sasl.mechanism", NormalizeSaslMechanism(settings.SaslMechanism));
+            if (string.IsNullOrWhiteSpace(settings.Username))
+            {
+                throw new InvalidOperationException("Username is required for SASL Kafka connections.");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.Password))
+            {
+                throw new InvalidOperationException("Password is required for SASL Kafka connections.");
+            }
+
+            AddIfPresent(config, "sasl.mechanism", normalizedSaslMechanism);
             AddIfPresent(config, "sasl.username", settings.Username);
             AddIfPresent(config, "sasl.password", settings.Password);
         }
@@ -81,6 +93,8 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
                 config[pair.Key] = pair.Value;
             }
         }
+
+        config["client.id"] = effectiveClientId;
 
         if (logger?.IsEnabled(LogLevel.Debug) == true)
         {
@@ -114,7 +128,7 @@ internal sealed class KafkaConfigurationService(ILogger<KafkaConfigurationServic
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return null;
+            return "sasl_plaintext";
         }
 
         var trimmed = value.Trim();

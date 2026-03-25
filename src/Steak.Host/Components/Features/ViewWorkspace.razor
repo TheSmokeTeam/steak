@@ -2,6 +2,7 @@
 @inject ILogger<ViewWorkspace> Logger
 @inject ITopicBrowserService TopicBrowserService
 @inject IViewSessionService ViewSessionService
+@inject IUiToastService ToastService
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -66,14 +67,6 @@ Timestamp — start from a specific point in time.</span></span></span>
             </select>
         </label>
         <label>
-            <span>Group Id (optional) <span class="tooltip-icon">?<span class="tooltip-text">Consumer group for offset tracking.
-Leave blank for an ephemeral viewer (no commits).
-Setting a group lets "Stored" offset mode resume.
-Multiple viewers sharing a group split partitions.
-Useful for bookmarking your read position.</span></span></span>
-            <input @bind="_groupId" placeholder="leave blank for ephemeral viewer" />
-        </label>
-        <label>
             <span>Message Filter <span class="tooltip-icon">?<span class="tooltip-text">Search text applied to buffered messages.
 Filters the message list in real-time.
 Matches against key, value preview, and headers.
@@ -96,6 +89,8 @@ Does not affect what is consumed from Kafka.</span></span></span>
             @(_sessionStatus.IsRunning ? $"Streaming {_sessionStatus.ReceivedCount} messages" : "Idle")
         </span>
     </div>
+
+    <ToastTray />
 
     <div class="metric-grid">
         <div class="metric-card"><strong>Topics</strong><span>@_topics.Count loaded</span></div>
@@ -277,13 +272,13 @@ Does not affect what is consumed from Kafka.</span></span></span>
     private string _selectedPartitionValue = string.Empty;
     private string _topicFilter = string.Empty;
     private string _messageFilter = string.Empty;
-    private string _groupId = string.Empty;
     private bool _loadingTopics;
     private string? _loadedSessionId;
     private string? _error;
     private MessageOffsetMode _offsetMode = MessageOffsetMode.Earliest;
     private string _keyDeserializer = "UTF-8 String";
     private string _valueDeserializer = "Pretty JSON";
+    private bool _stopRequested;
 
     private static readonly string[] _deserializerFormats = [
         "UTF-8 String",
@@ -373,14 +368,14 @@ Does not affect what is consumed from Kafka.</span></span></span>
         _error = null;
         try
         {
+            _stopRequested = false;
             var request = new StartViewSessionRequest
             {
                 ConnectionSessionId = ConnectionSessionId,
                 Topic = _selectedTopic!,
                 Partition = int.TryParse(_selectedPartitionValue, out var p) ? p : null,
                 OffsetMode = _offsetMode,
-                GroupId = string.IsNullOrWhiteSpace(_groupId) ? null : _groupId.Trim(),
-                MaxMessages = 0
+                MaxMessages = 250
             };
             _sessionStatus = await ViewSessionService.StartAsync(request).ConfigureAwait(false);
             _selectedMessage = _sessionStatus.RecentMessages.LastOrDefault();
@@ -396,6 +391,7 @@ Does not affect what is consumed from Kafka.</span></span></span>
     {
         try
         {
+            _stopRequested = true;
             await ViewSessionService.StopAsync().ConfigureAwait(false);
             _sessionStatus = ViewSessionService.Snapshot;
         }
@@ -414,7 +410,14 @@ Does not affect what is consumed from Kafka.</span></span></span>
 
     private void HandleStateChanged(object? sender, EventArgs e)
     {
+        var previousStatus = _sessionStatus;
         _sessionStatus = ViewSessionService.Snapshot;
+
+        if (previousStatus.IsRunning && !_sessionStatus.IsRunning)
+        {
+            ShowCompletionToast(previousStatus, _sessionStatus);
+        }
+
         _selectedMessage ??= _sessionStatus.RecentMessages.LastOrDefault();
         _ = InvokeAsync(StateHasChanged);
     }
@@ -561,5 +564,32 @@ Does not affect what is consumed from Kafka.</span></span></span>
             fieldCount++;
         }
         return sb.Length > 0 ? sb.ToString().TrimEnd() : "(empty protobuf or not protobuf)";
+    }
+
+    private static string FormatCount(long count, string noun)
+    {
+        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+    }
+
+    private void ShowCompletionToast(ViewSessionStatus previousStatus, ViewSessionStatus currentStatus)
+    {
+        var wasStopped = _stopRequested;
+        _stopRequested = false;
+
+        if (!string.IsNullOrWhiteSpace(currentStatus.LastError))
+        {
+            ToastService.Show(
+                UiToastKind.Danger,
+                wasStopped ? "Live view stopped with error" : "Live view ended with error",
+                currentStatus.LastError);
+            return;
+        }
+
+        var title = wasStopped ? "Live view stopped" : "Live view finished";
+        var verb = wasStopped ? "Stopped" : "Finished";
+
+        ToastService.ShowInfo(
+            title,
+            $"{verb} viewing {previousStatus.Topic ?? "the selected topic"} after reading {FormatCount(previousStatus.ReceivedCount, "message")}.");
     }
 }

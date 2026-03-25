@@ -65,11 +65,6 @@ internal sealed class ConsumeExportBackgroundService(
             throw new InvalidOperationException("topic is required to start an export job.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.GroupId))
-        {
-            throw new InvalidOperationException("groupId is required to start an export job.");
-        }
-
         lock (_sync)
         {
             if (_snapshot.IsRunning)
@@ -91,8 +86,10 @@ internal sealed class ConsumeExportBackgroundService(
 
         var settings = sessionService.GetActiveSettings(request.ConnectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Consumer);
+        var effectiveGroupId = KafkaConnectionIdentity.ResolveConsumerGroupId(settings);
 
-        config["group.id"] = request.GroupId.Trim();
+        request.GroupId = effectiveGroupId;
+        config["group.id"] = effectiveGroupId;
         config["auto.offset.reset"] = request.OffsetMode.ToAutoOffsetReset().ToString().ToLowerInvariant();
         config["enable.auto.commit"] = "true";
         config["enable.auto.offset.store"] = "false";
@@ -115,7 +112,7 @@ internal sealed class ConsumeExportBackgroundService(
                 IsRunning = true,
                 ConnectionSessionId = request.ConnectionSessionId,
                 Topic = request.Topic,
-                GroupId = request.GroupId,
+                GroupId = effectiveGroupId,
                 Partition = request.Partition,
                 OffsetMode = request.OffsetMode,
                 StartedAtUtc = DateTimeOffset.UtcNow
@@ -172,6 +169,7 @@ internal sealed class ConsumeExportBackgroundService(
         IReadOnlyDictionary<string, string> config,
         CancellationToken cancellationToken)
     {
+        IConsumer<byte[], byte[]>? consumer = null;
         var startedAt = DateTimeOffset.UtcNow;
         var writer = writers.FirstOrDefault(w => w.TransportKind == request.Destination.TransportKind)
             ?? throw new InvalidOperationException($"No envelope writer registered for transport {request.Destination.TransportKind}.");
@@ -190,7 +188,7 @@ internal sealed class ConsumeExportBackgroundService(
 
         try
         {
-            using var consumer = new ConsumerBuilder<byte[], byte[]>(config)
+            consumer = new ConsumerBuilder<byte[], byte[]>(config)
                 .SetKeyDeserializer(Deserializers.ByteArray)
                 .SetValueDeserializer(Deserializers.ByteArray)
                 .SetErrorHandler((_, error) =>
@@ -292,9 +290,6 @@ internal sealed class ConsumeExportBackgroundService(
             {
                 logger.LogWarning(exception, "Final Kafka offset commit failed when stopping export job.");
             }
-
-            logger.LogDebug("Closing Kafka export consumer for topic {Topic}", request.Topic);
-            consumer.Close();
         }
         catch (OperationCanceledException)
         {
@@ -307,6 +302,21 @@ internal sealed class ConsumeExportBackgroundService(
         }
         finally
         {
+            if (consumer is not null)
+            {
+                try
+                {
+                    logger.LogDebug("Closing Kafka export consumer for topic {Topic}", request.Topic);
+                    consumer.Close();
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "Closing Kafka export consumer failed for topic {Topic}", request.Topic);
+                }
+
+                consumer.Dispose();
+            }
+
             CompleteJob();
         }
     }

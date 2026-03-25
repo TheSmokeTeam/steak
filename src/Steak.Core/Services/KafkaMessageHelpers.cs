@@ -25,17 +25,6 @@ internal static class KafkaMessageHelpers
         };
     }
 
-    public static string BuildViewGroupId(StartViewSessionRequest request)
-    {
-        if (!string.IsNullOrWhiteSpace(request.GroupId))
-        {
-            return request.GroupId.Trim();
-        }
-
-        var candidate = $"steak-view-{FileNameFactory.SanitizeTopic(request.Topic)}-{Guid.NewGuid():N}";
-        return candidate[..Math.Min(60, candidate.Length)];
-    }
-
     public static Headers BuildHeaders(IEnumerable<SteakMessageHeader> headers)
     {
         var kafkaHeaders = new Headers();

@@ -42,6 +42,26 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
+    public void Connect_PersistsConnectionName()
+    {
+        var response = _service.Connect(new ConnectRequest
+        {
+            Settings = new KafkaConnectionSettings
+            {
+                ConnectionName = "Local Kafka",
+                BootstrapServers = "localhost:9092",
+                Username = "admin",
+                Password = "secret"
+            }
+        });
+
+        var status = _service.GetAllSessions().Single(session => session.ConnectionSessionId == response.ConnectionSessionId);
+
+        Assert.Equal("Local Kafka", status.ConnectionName);
+        Assert.Equal("Local Kafka", response.ConnectionName);
+    }
+
+    [Fact]
     public void Connect_DefaultsSecurityProtocolAndSaslMechanism()
     {
         var response = ConnectDefault();
@@ -49,7 +69,7 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("SaslPlaintext", settings.SecurityProtocol);
-        Assert.Equal("ScramSha512", settings.SaslMechanism);
+        Assert.Equal("ScramSha256", settings.SaslMechanism);
     }
 
     [Fact]
@@ -64,7 +84,7 @@ public sealed class ConnectionSessionServiceTests
     }
 
     [Fact]
-    public void Connect_PreservesExplicitClientId()
+    public void Connect_OverridesExplicitClientIdWithUsername()
     {
         _service.Connect(new ConnectRequest
         {
@@ -80,7 +100,7 @@ public sealed class ConnectionSessionServiceTests
         var sessions = _service.GetAllSessions();
         var settings = _service.GetActiveSettings(sessions[0].ConnectionSessionId!);
 
-        Assert.Equal("custom-client", settings.ClientId);
+        Assert.Equal("admin", settings.ClientId);
     }
 
     [Fact]
@@ -119,8 +139,46 @@ public sealed class ConnectionSessionServiceTests
         Assert.Contains("Password", ex.Message);
     }
 
+    [Theory]
+    [InlineData("Plaintext")]
+    [InlineData("Ssl")]
+    public void Connect_ThrowsWhenUsernameMissingEvenForNonSaslProtocols(string securityProtocol)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _service.Connect(new ConnectRequest
+            {
+                Settings = new KafkaConnectionSettings
+                {
+                    BootstrapServers = "localhost:9092",
+                    SecurityProtocol = securityProtocol,
+                    Password = "p"
+                }
+            }));
+
+        Assert.Contains("Username", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("Plaintext")]
+    [InlineData("Ssl")]
+    public void Connect_ThrowsWhenPasswordMissingEvenForNonSaslProtocols(string securityProtocol)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _service.Connect(new ConnectRequest
+            {
+                Settings = new KafkaConnectionSettings
+                {
+                    BootstrapServers = "localhost:9092",
+                    SecurityProtocol = securityProtocol,
+                    Username = "u"
+                }
+            }));
+
+        Assert.Contains("Password", ex.Message);
+    }
+
     [Fact]
-    public void Connect_AllowsPlaintextWithoutCredentials()
+    public void Connect_AllowsPlaintextWhenCredentialsPresent()
     {
         var response = _service.Connect(new ConnectRequest
         {
@@ -128,20 +186,22 @@ public sealed class ConnectionSessionServiceTests
             {
                 BootstrapServers = "localhost:9092",
                 SecurityProtocol = "Plaintext",
-                SaslMechanism = "Plain"
+                SaslMechanism = "Plain",
+                Username = "plain-user",
+                Password = "plain-pass"
             }
         });
 
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("Plaintext", settings.SecurityProtocol);
-        Assert.Null(settings.Username);
-        Assert.Null(settings.Password);
+        Assert.Equal("plain-user", settings.Username);
+        Assert.Equal("plain-pass", settings.Password);
         Assert.Equal("Plain", settings.SaslMechanism);
     }
 
     [Fact]
-    public void Connect_AllowsSslWithoutCredentials()
+    public void Connect_AllowsSslWhenCredentialsPresent()
     {
         var response = _service.Connect(new ConnectRequest
         {
@@ -149,6 +209,8 @@ public sealed class ConnectionSessionServiceTests
             {
                 BootstrapServers = "localhost:9092",
                 SecurityProtocol = "Ssl",
+                Username = "ssl-user",
+                Password = "ssl-pass",
                 SslCaPem = "ca-pem"
             }
         });
@@ -156,13 +218,14 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("Ssl", settings.SecurityProtocol);
-        Assert.Null(settings.Username);
-        Assert.Null(settings.Password);
+        Assert.Equal("ssl-user", settings.Username);
+        Assert.Equal("ssl-pass", settings.Password);
         Assert.Equal("ca-pem", settings.SslCaPem);
+        Assert.Equal("ScramSha256", settings.SaslMechanism);
     }
 
     [Fact]
-    public void Connect_DefaultsClientIdFromUsernameBeforeDroppingPlaintextCredentials()
+    public void Connect_UsesUsernameForClientIdWithoutDroppingPlaintextIdentity()
     {
         var response = _service.Connect(new ConnectRequest
         {
@@ -178,8 +241,8 @@ public sealed class ConnectionSessionServiceTests
         var settings = _service.GetActiveSettings(response.ConnectionSessionId);
 
         Assert.Equal("local-user", settings.ClientId);
-        Assert.Null(settings.Username);
-        Assert.Null(settings.Password);
+        Assert.Equal("local-user", settings.Username);
+        Assert.Equal("ignored", settings.Password);
     }
 
     [Fact]

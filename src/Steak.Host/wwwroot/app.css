@@ -93,7 +93,19 @@ label {
   gap: 0.45rem;
 }
 
+.field-stack {
+  display: grid;
+  gap: 0.45rem;
+}
+
 label span {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.field-stack > span {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -721,6 +733,130 @@ label span {
   color: #ffd8d2;
 }
 
+.toast-tray {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.toast-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: flex-start;
+  width: min(31rem, 100%);
+  padding: 0.95rem 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(
+    180deg,
+    rgba(18, 27, 32, 0.94),
+    rgba(11, 17, 21, 0.92)
+  );
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  animation: toast-enter 180ms ease-out;
+}
+
+.toast-card.info {
+  border-color: rgba(255, 179, 107, 0.18);
+  background:
+    linear-gradient(135deg, rgba(255, 179, 107, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(18, 27, 32, 0.94), rgba(11, 17, 21, 0.92));
+}
+
+.toast-card.success {
+  border-color: rgba(95, 199, 142, 0.28);
+  background:
+    linear-gradient(135deg, rgba(95, 199, 142, 0.1), transparent 35%),
+    linear-gradient(180deg, rgba(18, 27, 32, 0.94), rgba(11, 17, 21, 0.92));
+}
+
+.toast-card.warning {
+  border-color: rgba(255, 179, 107, 0.34);
+  background:
+    linear-gradient(135deg, rgba(255, 179, 107, 0.12), transparent 35%),
+    linear-gradient(180deg, rgba(18, 27, 32, 0.94), rgba(11, 17, 21, 0.92));
+}
+
+.toast-card.danger {
+  border-color: rgba(255, 114, 98, 0.34);
+  background:
+    linear-gradient(135deg, rgba(255, 114, 98, 0.12), transparent 35%),
+    linear-gradient(180deg, rgba(18, 27, 32, 0.94), rgba(11, 17, 21, 0.92));
+}
+
+.toast-copy {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-right: 0.25rem;
+}
+
+.toast-indicator {
+  width: 0.72rem;
+  height: 0.72rem;
+  margin-top: 0.32rem;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 0.35rem rgba(255, 179, 107, 0.12);
+}
+
+.toast-card.success .toast-indicator {
+  background: var(--success);
+  box-shadow: 0 0 0 0.35rem rgba(95, 199, 142, 0.14);
+}
+
+.toast-card.warning .toast-indicator {
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 0.35rem rgba(255, 179, 107, 0.14);
+}
+
+.toast-card.danger .toast-indicator {
+  background: var(--danger);
+  box-shadow: 0 0 0 0.35rem rgba(255, 114, 98, 0.14);
+}
+
+.toast-title {
+  display: block;
+  font-size: 0.96rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.toast-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.toast-dismiss {
+  border: none;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(236, 245, 240, 0.72);
+  font-size: 1.05rem;
+  line-height: 1;
+  place-self: start;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.toast-dismiss:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  transform: none;
+}
+
 .empty-state.compact {
   font-size: 0.95rem;
 }
@@ -762,6 +898,18 @@ code {
 #blazor-error-ui .dismiss {
   float: right;
   cursor: pointer;
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 1200px) {
@@ -816,6 +964,7 @@ code {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
 }
 
 /* Browse row for file pickers */
@@ -823,11 +972,15 @@ code {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  min-width: 0;
 }
 
 .browse-row input[type="text"],
-.browse-row input:not([type]) {
+.browse-row input:not([type]),
+.browse-row input[type="search"],
+.browse-row input[type="url"] {
   flex: 1;
+  min-width: 0;
 }
 
 .browse-input {
@@ -838,6 +991,8 @@ code {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Checkbox field */

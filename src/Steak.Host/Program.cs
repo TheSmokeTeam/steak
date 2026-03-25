@@ -95,6 +95,8 @@ public class Program
             builder.Services.AddOpenApi();
             builder.Services.AddSwaggerGen();
             builder.Services.AddSteakCore(builder.Configuration);
+            builder.Services.AddSingleton<ILocalFolderPicker, LocalFolderPicker>();
+            builder.Services.AddScoped<IUiToastService, UiToastService>();
             builder.Services.AddHostedService<BrowserLaunchHostedService>();
 
             var app = builder.Build();

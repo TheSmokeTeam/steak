@@ -1,8 +1,11 @@
+@implements IDisposable
 @inject ILogger<PublishWorkspace> Logger
 @inject IMessagePublisher MessagePublisher
 @inject IMessagePreviewService MessagePreviewService
 @inject ITopicBrowserService TopicBrowserService
 @inject IBatchPublishService BatchPublishService
+@inject ILocalFolderPicker FolderPicker
+@inject IUiToastService ToastService
 
 <div class="workspace-panel">
     <div class="panel-header">
@@ -31,18 +34,17 @@ Each file becomes one Kafka message.</span></span></span>
 
         @if (_sourceTransport == BatchTransportKind.FileSystem)
         {
-            <label>
+            <div class="field-stack">
                 <span>Source Folder <span class="tooltip-icon">?<span class="tooltip-text">Local directory containing Steak envelope JSON files.
 All .json files in the folder are read and published.
 Files are processed in alphabetical order.
-Use the Browse button to pick a file as a hint.
+Use the Browse button to choose the source folder directly.
 Absolute paths are recommended (e.g. D:\Exports).</span></span></span>
                 <div class="browse-row">
                     <input @bind="_sourceFsPath" placeholder="D:\KafkaExports" />
-                    <InputFile OnChange="OnSourceFolderHintSelected" class="browse-input" id="publish-folder-picker" accept="*" />
-                    <label for="publish-folder-picker" class="ghost-button browse-button">Browse</label>
+                    <button type="button" class="ghost-button browse-button" @onclick="BrowseSourceFolderAsync">Browse</button>
                 </div>
-            </label>
+            </div>
         }
         else
         {
@@ -126,6 +128,8 @@ Combine with messages/second to control rate.</span></span></span>
             @(_batchStatus.IsRunning ? $"{_batchStatus.PublishedCount}/{_batchStatus.TotalEnvelopes} published" : "Idle")
         </span>
     </div>
+
+    <ToastTray />
 
     @if (!string.IsNullOrWhiteSpace(_batchError))
     {
@@ -246,11 +250,18 @@ Use "Load Sample" to see the expected format.
     private double _batchMps;
     private string? _batchError;
     private bool _batchLoop;
+    private bool _stopRequested;
 
     private bool CanStartBatch => !string.IsNullOrWhiteSpace(ConnectionSessionId)
         && !_batchStatus.IsRunning
         && (_sourceTransport != BatchTransportKind.FileSystem || !string.IsNullOrWhiteSpace(_sourceFsPath))
         && (_sourceTransport != BatchTransportKind.S3 || !string.IsNullOrWhiteSpace(_sourceS3Bucket));
+
+    protected override void OnInitialized()
+    {
+        _batchStatus = BatchPublishService.Snapshot;
+        BatchPublishService.StateChanged += HandleBatchStateChanged;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -314,6 +325,7 @@ Use "Load Sample" to see the expected format.
         _batchError = null;
         try
         {
+            _stopRequested = false;
             var request = new BatchPublishRequest
             {
                 ConnectionSessionId = ConnectionSessionId,
@@ -336,6 +348,7 @@ Use "Load Sample" to see the expected format.
     {
         try
         {
+            _stopRequested = true;
             await BatchPublishService.StopAsync().ConfigureAwait(false);
             _batchStatus = BatchPublishService.Snapshot;
         }
@@ -431,10 +444,66 @@ Use "Load Sample" to see the expected format.
         return envelope ?? throw new InvalidOperationException("The envelope editor is empty.");
     }
 
-    private void OnSourceFolderHintSelected(InputFileChangeEventArgs e)
+    private async Task BrowseSourceFolderAsync()
     {
-        var name = e.File?.Name;
-        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(_sourceFsPath))
-            _sourceFsPath = name;
+        try
+        {
+            var selectedPath = await FolderPicker.PickFolderAsync(_sourceFsPath).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+            {
+                _sourceFsPath = selectedPath;
+                _batchError = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Publish workspace failed to open the folder picker");
+            _batchError = UiErrorMessage.Build("Choose source folder", ex);
+        }
+    }
+
+    private void HandleBatchStateChanged(object? sender, EventArgs e)
+    {
+        var previousStatus = _batchStatus;
+        _batchStatus = BatchPublishService.Snapshot;
+
+        if (previousStatus.IsRunning && !_batchStatus.IsRunning)
+        {
+            ShowCompletionToast(previousStatus, _batchStatus);
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => BatchPublishService.StateChanged -= HandleBatchStateChanged;
+
+    private static string FormatCount(long count, string noun)
+    {
+        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+    }
+
+    private void ShowCompletionToast(BatchPublishJobStatus previousStatus, BatchPublishJobStatus currentStatus)
+    {
+        var wasStopped = _stopRequested;
+        _stopRequested = false;
+
+        if (!string.IsNullOrWhiteSpace(currentStatus.LastError))
+        {
+            ToastService.Show(
+                UiToastKind.Danger,
+                wasStopped ? "Publish stopped with error" : "Publish ended with error",
+                currentStatus.LastError);
+            return;
+        }
+
+        var topicScope = string.IsNullOrWhiteSpace(_batchTopicOverride)
+            ? "using the envelope topics"
+            : $"to {_batchTopicOverride}";
+        var title = wasStopped ? "Publish stopped" : "Publish finished";
+        var verb = wasStopped ? "Stopped" : "Finished";
+
+        ToastService.ShowInfo(
+            title,
+            $"{verb} batch publishing after sending {FormatCount(previousStatus.PublishedCount, "message")} {topicScope}.");
     }
 }

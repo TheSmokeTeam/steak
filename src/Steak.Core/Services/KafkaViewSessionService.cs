@@ -43,6 +43,8 @@ internal sealed class KafkaViewSessionService(
             throw new InvalidOperationException("topic is required to start a view session.");
         }
 
+        request.MaxMessages = request.MaxMessages > 0 ? request.MaxMessages : 250;
+
         logger.LogDebug(
             "Starting Kafka view session request. SessionId {SessionId}, topic {Topic}, partition {Partition}, offset mode {OffsetMode}, group {GroupId}, max messages {MaxMessages}",
             request.ConnectionSessionId,
@@ -56,8 +58,10 @@ internal sealed class KafkaViewSessionService(
 
         var settings = sessionService.GetActiveSettings(request.ConnectionSessionId);
         var config = configurationService.BuildConfig(settings, KafkaClientKind.Consumer);
+        var effectiveGroupId = KafkaConnectionIdentity.ResolveConsumerGroupId(settings);
 
-        config["group.id"] = KafkaMessageHelpers.BuildViewGroupId(request);
+        request.GroupId = effectiveGroupId;
+        config["group.id"] = effectiveGroupId;
         config["auto.offset.reset"] = request.OffsetMode.ToAutoOffsetReset().ToString().ToLowerInvariant();
         config["enable.auto.commit"] = "false";
         config["enable.partition.eof"] = "false";
@@ -194,9 +198,11 @@ internal sealed class KafkaViewSessionService(
 
     private async Task RunAsync(StartViewSessionRequest request, IReadOnlyDictionary<string, string> config, CancellationToken cancellationToken)
     {
+        IConsumer<byte[], byte[]>? consumer = null;
+
         try
         {
-            using var consumer = new ConsumerBuilder<byte[], byte[]>(config)
+            consumer = new ConsumerBuilder<byte[], byte[]>(config)
                 .SetKeyDeserializer(Deserializers.ByteArray)
                 .SetValueDeserializer(Deserializers.ByteArray)
                 .SetErrorHandler((_, error) =>
@@ -253,7 +259,7 @@ internal sealed class KafkaViewSessionService(
                 var result = consumer.Consume(cancellationToken);
                 if (result?.Message is null)
                 {
-                    logger.LogDebug("Kafka view session consume cycle returned no message for topic {Topic}", request.Topic);
+                logger.LogDebug("Kafka view session consume cycle returned no message for topic {Topic}", request.Topic);
                     continue;
                 }
 
@@ -269,9 +275,6 @@ internal sealed class KafkaViewSessionService(
                 PublishMessage(request, envelopeFactory.Create(request.ConnectionSessionId, result));
                 await Task.Yield();
             }
-
-            logger.LogDebug("Closing Kafka view session consumer for topic {Topic}", request.Topic);
-            consumer.Close();
         }
         catch (OperationCanceledException)
         {
@@ -284,6 +287,21 @@ internal sealed class KafkaViewSessionService(
         }
         finally
         {
+            if (consumer is not null)
+            {
+                try
+                {
+                    logger.LogDebug("Closing Kafka view session consumer for topic {Topic}", request.Topic);
+                    consumer.Close();
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "Closing Kafka view session consumer failed for topic {Topic}", request.Topic);
+                }
+
+                consumer.Dispose();
+            }
+
             CompleteSession();
         }
     }

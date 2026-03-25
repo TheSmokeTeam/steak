@@ -64,7 +64,7 @@ public enum BatchTransportKind
 
 /// <summary>
 /// Holds the Kafka connection fields submitted by the in-app connection form.
-/// Leave optional security fields blank for plaintext clusters.
+/// Username and password are required so Steak can keep a consistent client and consumer identity.
 /// </summary>
 public sealed class KafkaConnectionSettings
 {
@@ -74,12 +74,17 @@ public sealed class KafkaConnectionSettings
     public string BootstrapServers { get; set; } = string.Empty;
 
     /// <summary>
-    /// SASL username.
+    /// Optional friendly name shown in the Steak connection tabs.
+    /// </summary>
+    public string? ConnectionName { get; set; }
+
+    /// <summary>
+    /// Connection username used for SASL authentication and Steak identity derivation.
     /// </summary>
     public string? Username { get; set; }
 
     /// <summary>
-    /// SASL password.
+    /// Connection password used for SASL authentication.
     /// </summary>
     public string? Password { get; set; }
 
@@ -93,10 +98,11 @@ public sealed class KafkaConnectionSettings
     /// Optional SASL mechanism. Friendly names such as <c>Plain</c>,
     /// <c>ScramSha256</c>, and <c>ScramSha512</c> are accepted.
     /// </summary>
-    public string SaslMechanism { get; set; } = "ScramSha512";
+    public string SaslMechanism { get; set; } = "ScramSha256";
 
     /// <summary>
-    /// Optional client id applied to all connection types.
+    /// Client id applied to all connection types.
+    /// Steak derives this from <see cref="Username"/> so it stays aligned with consumer identity.
     /// </summary>
     public string? ClientId { get; set; }
 
@@ -151,6 +157,11 @@ public sealed class ConnectResponse
     /// Bootstrap servers that the session is connected to.
     /// </summary>
     public string BootstrapServers { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional friendly connection name chosen by the user.
+    /// </summary>
+    public string? ConnectionName { get; set; }
 }
 
 /// <summary>
@@ -172,6 +183,11 @@ public sealed class ConnectionSessionStatus
     /// Bootstrap servers, when connected.
     /// </summary>
     public string? BootstrapServers { get; set; }
+
+    /// <summary>
+    /// Optional friendly connection name chosen by the user.
+    /// </summary>
+    public string? ConnectionName { get; set; }
 
     /// <summary>
     /// Username used for the session.
@@ -605,6 +621,7 @@ public sealed class CreateConsumeJobRequest
 
     /// <summary>
     /// Consumer group id used for the export worker.
+    /// Steak derives this from the connection username and ignores conflicting caller values.
     /// </summary>
     public string GroupId { get; set; } = string.Empty;
 
@@ -721,7 +738,8 @@ public sealed class StartViewSessionRequest
     public MessageOffsetMode OffsetMode { get; set; } = MessageOffsetMode.Latest;
 
     /// <summary>
-    /// Optional caller-supplied consumer group id. Steak generates an ephemeral group when omitted.
+    /// Optional caller-supplied consumer group id.
+    /// Steak derives this from the connection username and ignores conflicting caller values.
     /// </summary>
     public string? GroupId { get; set; }
 

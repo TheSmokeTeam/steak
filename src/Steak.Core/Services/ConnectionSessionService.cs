@@ -31,21 +31,19 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
             throw new InvalidOperationException("Bootstrap servers are required to connect.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Settings.SecurityProtocol))
-        {
-            request.Settings.SecurityProtocol = "SaslPlaintext";
-        }
-
-        var requiresSasl = UsesSasl(request.Settings.SecurityProtocol);
-
-        if (requiresSasl && string.IsNullOrWhiteSpace(request.Settings.Username))
+        if (string.IsNullOrWhiteSpace(request.Settings.Username))
         {
             throw new InvalidOperationException("Username is required to connect.");
         }
 
-        if (requiresSasl && string.IsNullOrWhiteSpace(request.Settings.Password))
+        if (string.IsNullOrWhiteSpace(request.Settings.Password))
         {
             throw new InvalidOperationException("Password is required to connect.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Settings.SecurityProtocol))
+        {
+            request.Settings.SecurityProtocol = "SaslPlaintext";
         }
 
         request.Settings.Username = string.IsNullOrWhiteSpace(request.Settings.Username)
@@ -54,27 +52,25 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
         request.Settings.Password = string.IsNullOrWhiteSpace(request.Settings.Password)
             ? null
             : request.Settings.Password.Trim();
+        request.Settings.ConnectionName = string.IsNullOrWhiteSpace(request.Settings.ConnectionName)
+            ? null
+            : request.Settings.ConnectionName.Trim();
 
-        // Default client id to username when not explicitly set and a username exists.
-        if (string.IsNullOrWhiteSpace(request.Settings.ClientId)
-            && !string.IsNullOrWhiteSpace(request.Settings.Username))
-        {
-            request.Settings.ClientId = request.Settings.Username.Trim();
-        }
+        var requiresSasl = UsesSasl(request.Settings.SecurityProtocol);
 
         if (requiresSasl && string.IsNullOrWhiteSpace(request.Settings.SaslMechanism))
         {
-            request.Settings.SaslMechanism = "ScramSha512";
+            request.Settings.SaslMechanism = "ScramSha256";
+        }
+        else if (!requiresSasl && string.IsNullOrWhiteSpace(request.Settings.SaslMechanism))
+        {
+            request.Settings.SaslMechanism = "ScramSha256";
         }
 
-        if (!requiresSasl)
-        {
-            request.Settings.Username = null;
-            request.Settings.Password = null;
-            request.Settings.SaslMechanism = string.IsNullOrWhiteSpace(request.Settings.SaslMechanism)
-                ? string.Empty
-                : request.Settings.SaslMechanism.Trim();
-        }
+        request.Settings.ClientId = KafkaConnectionIdentity.ResolveClientId(request.Settings);
+        request.Settings.SaslMechanism = string.IsNullOrWhiteSpace(request.Settings.SaslMechanism)
+            ? "ScramSha256"
+            : request.Settings.SaslMechanism.Trim();
 
         if (requiresSasl)
         {
@@ -111,7 +107,8 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
         return new ConnectResponse
         {
             ConnectionSessionId = sessionId,
-            BootstrapServers = request.Settings.BootstrapServers
+            BootstrapServers = request.Settings.BootstrapServers,
+            ConnectionName = request.Settings.ConnectionName
         };
     }
 
@@ -160,6 +157,7 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
                 IsConnected = true,
                 ConnectionSessionId = first.Key,
                 BootstrapServers = first.Value.Settings.BootstrapServers,
+                ConnectionName = first.Value.Settings.ConnectionName,
                 Username = first.Value.Settings.Username,
                 ConnectedAtUtc = first.Value.ConnectedAtUtc
             };
@@ -176,6 +174,7 @@ internal sealed class ConnectionSessionService(ILogger<ConnectionSessionService>
                     IsConnected = true,
                     ConnectionSessionId = kv.Key,
                     BootstrapServers = kv.Value.Settings.BootstrapServers,
+                    ConnectionName = kv.Value.Settings.ConnectionName,
                     Username = kv.Value.Settings.Username,
                     ConnectedAtUtc = kv.Value.ConnectedAtUtc
                 })
