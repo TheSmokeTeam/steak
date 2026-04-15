@@ -222,6 +222,17 @@ Use "Load Sample" to see the expected format.
 </div>
 
 @code {
+    private static readonly System.Text.Json.JsonSerializerOptions EnvelopeJsonWriteOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    private static readonly System.Text.Json.JsonSerializerOptions EnvelopeJsonReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     [Parameter]
     public string? ConnectionSessionId { get; set; }
 
@@ -375,7 +386,7 @@ Use "Load Sample" to see the expected format.
                 new SteakMessageHeader { Key = "x-demo", ValueBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("steak-sample")) }
             ]
         };
-        _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, EnvelopeJsonWriteOptions);
         _preview = null;
         _publishResult = null;
         _singleError = null;
@@ -403,7 +414,7 @@ Use "Load Sample" to see the expected format.
         try
         {
             var envelope = ParseEnvelope();
-            _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            _envelopeJson = System.Text.Json.JsonSerializer.Serialize(envelope, EnvelopeJsonWriteOptions);
             _singleError = null;
         }
         catch (Exception ex)
@@ -440,7 +451,7 @@ Use "Load Sample" to see the expected format.
 
     private SteakMessageEnvelope ParseEnvelope()
     {
-        var envelope = System.Text.Json.JsonSerializer.Deserialize<SteakMessageEnvelope>(_envelopeJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var envelope = System.Text.Json.JsonSerializer.Deserialize<SteakMessageEnvelope>(_envelopeJson, EnvelopeJsonReadOptions);
         return envelope ?? throw new InvalidOperationException("The envelope editor is empty.");
     }
 

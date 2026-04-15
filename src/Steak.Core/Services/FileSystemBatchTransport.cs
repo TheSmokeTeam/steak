@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Steak.Core.Contracts;
@@ -62,7 +63,8 @@ internal sealed class FileSystemEnvelopeWriter(ILogger<FileSystemEnvelopeWriter>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = true
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     public BatchTransportKind TransportKind => BatchTransportKind.FileSystem;

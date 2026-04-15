@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Steak.Core.Contracts;
 
@@ -8,6 +9,11 @@ internal sealed class MessagePreviewService : IMessagePreviewService
 {
     private const int MaxPreviewChars = 16_384;
     private const int MaxHexChars = 8_192;
+    private static readonly JsonSerializerOptions PrettyJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public MessagePreview CreatePreview(string? keyBase64, string valueBase64)
     {
@@ -101,10 +107,7 @@ internal sealed class MessagePreviewService : IMessagePreviewService
         try
         {
             using var document = JsonDocument.Parse(input);
-            return Clip(JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            }));
+            return Clip(JsonSerializer.Serialize(document.RootElement, PrettyJsonOptions));
         }
         catch (JsonException)
         {
