@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -107,7 +108,8 @@ internal sealed class S3EnvelopeWriter(ILogger<S3EnvelopeWriter>? logger = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = true
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     public BatchTransportKind TransportKind => BatchTransportKind.S3;

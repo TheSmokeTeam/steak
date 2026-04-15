@@ -29,7 +29,7 @@ jobs:
         run: dotnet build --no-restore -c Release
 
       - name: Test
-        run: dotnet test --no-build -c Release --verbosity normal
+        run: dotnet test ./tests/Steak.Tests/Steak.Tests.csproj --no-build -c Release --verbosity normal
 
   docker:
     needs: build-and-test
@@ -137,7 +137,7 @@ jobs:
         run: dotnet build --no-restore -c Release
 
       - name: Test
-        run: dotnet test --no-build -c Release --verbosity normal
+        run: dotnet test .\tests\Steak.Tests\Steak.Tests.csproj --no-build -c Release --verbosity normal
 
       - name: Publish standalone exe
         run: dotnet publish .\src\Steak.Host\Steak.Host.csproj -c Release -p:PublishProfile=Steak-win-x64

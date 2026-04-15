@@ -48,4 +48,23 @@ public sealed class MessagePreviewServiceTests
         Assert.True(header.IsUtf8);
         Assert.False(header.IsTruncated);
     }
+
+    [Fact]
+    public void CreatePreview_PreservesLiteralJsonCharactersInPrettyPreview()
+    {
+        var service = new MessagePreviewService();
+        var payload = """{"comparison":">","html":"<tag>","ampersand":"&"}""";
+
+        var preview = service.CreatePreview(
+            null,
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+        Assert.NotNull(preview.ValuePrettyJson);
+        Assert.Contains("\"comparison\": \">\"", preview.ValuePrettyJson);
+        Assert.Contains("\"html\": \"<tag>\"", preview.ValuePrettyJson);
+        Assert.Contains("\"ampersand\": \"&\"", preview.ValuePrettyJson);
+        Assert.DoesNotContain("\\u003E", preview.ValuePrettyJson);
+        Assert.DoesNotContain("\\u003C", preview.ValuePrettyJson);
+        Assert.DoesNotContain("\\u0026", preview.ValuePrettyJson);
+    }
 }
